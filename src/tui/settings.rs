@@ -119,6 +119,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         section: "opencode-go",
         note: "usage quota",
     },
+    KeyVendor {
+        id: VendorId::Tavily,
+        label: "Tavily",
+        env: "TAVILY_API_KEY",
+        section: "tavily",
+        note: "usage & quota",
+    },
 ];
 
 /// Read the inline `api_key` currently in config for a given section, so the
@@ -136,6 +143,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "grok" => cfg.grok.api_key.as_deref(),
         "minimax" => cfg.minimax.api_key.as_deref(),
         "opencode-go" => cfg.opencode_go.api_key.as_deref(),
+        "tavily" => cfg.tavily.api_key.as_deref(),
         _ => None,
     }
 }

@@ -24,6 +24,7 @@ defensive and includes opt-in live tests for catching response changes.
 | **Kiro CLI** | `codewhisperer.<region>.amazonaws.com` `GetUsageLimits` (undocumented; the same call kiro-cli's own `/usage` slash command makes) | Single credit pool this cycle — used/limit/%, plan, reset | No — widget/TUI only |
 | **Nous Research** | `portal.nousresearch.com/api/oauth/account` (OAuth-authenticated Portal account response) | Subscription usage %, subscription credits, top-up/purchased credits, total usable credits, renewal | Yes |
 | **OpenCode Go** | `opencode.ai/zen/go/v1/usage` | Rolling, weekly, and monthly `percent` windows with absolute reset timestamps | Yes |
+| **Tavily** | `api.tavily.com/usage` (documented; optional `X-Project-ID` header) | Plan billing-cycle used/limit (%), pay-as-you-go, this key's used/limit, per-endpoint breakdown (search/extract/crawl/map/research) | Yes |
 
 
 ## Stability notes
@@ -37,6 +38,7 @@ defensive and includes opt-in live tests for catching response changes.
 | Cursor | Undocumented endpoint called by Cursor's dashboard. Its shape may change with Cursor pricing. |
 | MiniMax | The Token Plan route is official, but no formal response schema is published. |
 | Kiro CLI | `GetUsageLimits` is the same undocumented CodeWhisperer operation used by kiro-cli's `/usage` command. AWS SSO OIDC `CreateToken`, used for refresh, is documented. |
+| Tavily | Documented `/usage` route with published OpenAPI schema. The `plan_limit`/`key.limit` fields are `null` for unlimited plans; the payload carries no reset timestamp. |
 
 Codex's known five-hour and seven-day windows are matched by their reported
 duration, not by `primary_window` or `secondary_window` position. This handles
@@ -52,7 +54,7 @@ make smoke
 
 Claude, Codex, Z.AI, and OpenRouter tests require their normal credentials or
 API keys. Kimi is optional: its test prints a skip reason when `KIMI_API_KEY` is
-unset.
+unset. Tavily is likewise optional and skips without `TAVILY_API_KEY`.
 
 To test only Kimi:
 

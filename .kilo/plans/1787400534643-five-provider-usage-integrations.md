@@ -97,19 +97,21 @@ Official documentation is authoritative. Before implementing each slice, recheck
 
 ## Ordered Implementation Tasks
 
-### 1. Shared Registration Surface
+### 1. Shared Registration Surface  ✅ (Tavily portion done 2026-08-23)
 
-- Add the five IDs, stable slugs (`tavily`, `firecrawl`, `requesty`, `zenmux`, `vercel-ai-gateway`), display names (`Tavily`, `Firecrawl`, `Requesty`, `ZenMux`, `Vercel AI Gateway`), secret environment variables (`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `REQUESTY_API_KEY`, `ZENMUX_MANAGEMENT_API_KEY`, `AI_GATEWAY_API_KEY`), command-line enum mappings (`VendorId` + `Vendor` in `src/vendor.rs` / `src/widget/cli.rs`), and active-vendor slug parsing in `src/active.rs` as each vertical slice lands. **REV**: also extend `VENDOR_SECRET_ENV_VARS` and `vendor_secret_env_vars_to_remove` in `src/vendor.rs`.
-- Add opt-in configuration sections and defaults in `src/config.rs`; include inline-key permission detection (`has_inline_api_keys`, `protect_inline_api_keys`), validation (`validate`: duplicate labels, TTL bounds for Vercel, non-empty `api_key_env`), environment-key resolution (`resolve_api_key`), and `config.example.toml` coverage with `enabled = false` defaults.
-- Register API-key providers in `src/tui/settings.rs` (`KEY_VENDORS` array) without exposing key values through settings JSON (stdin-only, `toml_edit` atomic write, `chmod 600`).
-- Export each module from `src/lib.rs` and add its snapshot variant to `src/usage.rs` (`VendorSnapshot::Tavily(...)` etc.).
+- [x] Add the five IDs, stable slugs (`tavily`, `firecrawl`, `requesty`, `zenmux`, `vercel-ai-gateway`), display names (`Tavily`, `Firecrawl`, `Requesty`, `ZenMux`, `Vercel AI Gateway`), secret environment variables (`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `REQUESTY_API_KEY`, `ZENMUX_MANAGEMENT_API_KEY`, `AI_GATEWAY_API_KEY`), command-line enum mappings (`VendorId` + `Vendor` in `src/vendor.rs` / `src/widget/cli.rs`), and active-vendor slug parsing in `src/active.rs` as each vertical slice lands. **REV**: also extend `VENDOR_SECRET_ENV_VARS` and `vendor_secret_env_vars_to_remove` in `src/vendor.rs`.
+- [x] Add opt-in configuration sections and defaults in `src/config.rs`; include inline-key permission detection (`has_inline_api_keys`, `protect_inline_api_keys`), validation (`validate`: duplicate labels, TTL bounds for Vercel, non-empty `api_key_env`), environment-key resolution (`resolve_api_key`), and `config.example.toml` coverage with `enabled = false` defaults.
+- [x] Register API-key providers in `src/tui/settings.rs` (`KEY_VENDORS` array) without exposing key values through settings JSON (stdin-only, `toml_edit` atomic write, `chmod 600`).
+- [x] Export each module from `src/lib.rs` and add its snapshot variant to `src/usage.rs` (`VendorSnapshot::Tavily(...)` etc.).
 
-### 2. Tavily Vertical Slice
+### 2. Tavily Vertical Slice  ✅ (done 2026-08-23; verified against official OpenAPI schema)
 
-- Create `src/tavily/{mod,types,fetch,vendor}.rs`, following the single-endpoint cache flow (fresh-payload → flock → fetch → capped read → strict parse → atomic write).
-- Implement defensive wire parsing (required fields, non-negative quotas, finite money), project-scoped cache attribution (fingerprint includes `X-Project-ID` when set), renderer placeholders (`tav_*`), severity (plan %), widget dispatch, TUI refresh, overview cells, and detailed sections via `SectionBuilder`.
-- Add mocked response/cache/failure tests, configuration tests (missing key, invalid project_id), ignored live smoke test behind `#[ignore]` with `TAVILY_API_KEY`, JSON report assertions (ordered sections, no fake percentages), placeholder coverage, endpoint matrix (`docs/vendor-endpoints.md`), README usage, and changelog entry (Keep-a-Changelog `Added`).
-- Complete all current desktop adapter mappings and tests before starting Firecrawl (GNOME marker, macOS `fixedFieldMapping`, KDE client-side selection, Omarchy `model.test.mjs`).
+- [x] Create `src/tavily/{mod,types,fetch,vendor}.rs`, following the single-endpoint cache flow (fresh-payload → flock → fetch → capped read → strict parse → atomic write).
+- [x] Implement defensive wire parsing (required fields, non-negative quotas, finite money), project-scoped cache attribution (fingerprint includes `X-Project-ID` when set), renderer placeholders (`tav_*`), severity (plan %), widget dispatch, TUI refresh, overview cells, and detailed sections via `SectionBuilder`.
+- [x] Add mocked response/cache/failure tests, configuration tests (missing key, invalid project_id), ignored live smoke test behind `#[ignore]` with `TAVILY_API_KEY`, JSON report assertions (ordered sections, no fake percentages), placeholder coverage, endpoint matrix (`docs/vendor-endpoints.md`), README usage, and changelog entry (Keep-a-Changelog `Added`).
+- [x] Complete all current desktop adapter mappings and tests before starting Firecrawl (GNOME marker, macOS `fixedFieldMapping`, KDE client-side selection, Omarchy `model.test.mjs`). macOS: `VENDOR_AUTH` + `defaultEnabled` + `ai-usagebar-tests.swift` updated. GNOME/KDE/Omarchy are data-driven and needed no change.
+
+**Slice notes**: field names implemented from the published OpenAPI schema (`account.current_plan`, `plan_usage`, `plan_limit`, `paygo_usage`, `paygo_limit`, `key.usage/limit`, `*_usage` breakdown) — superseding the illustrative shapes in spec §6.2. Fingerprint follows the existing `sha2`/`opencode_go` convention. No new Cargo dependency. `cargo test --all-targets`, `make test`, `make desktop-test`, `cargo machete` green; `cargo clippy -D warnings` passes on Linux (Windows-only pre-existing `cfg(unix)` dead-code warnings in `src/nous/credentials.rs` are untouched).
 
 ### 3. Firecrawl Vertical Slice
 

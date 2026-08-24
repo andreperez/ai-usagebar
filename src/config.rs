@@ -57,6 +57,7 @@ pub struct Config {
     pub nous: NousConfig,
     #[serde(rename = "opencode-go")]
     pub opencode_go: OpenCodeGoConfig,
+    pub tavily: TavilyConfig,
 }
 
 /// UI / dispatch preferences. Currently just `primary` — which vendor the
@@ -493,6 +494,34 @@ impl Default for OpenCodeGoConfig {
             enabled: false,
             api_key_env: "OPENCODE_GO_API_KEY".to_string(),
             api_key: None,
+        }
+    }
+}
+
+/// Tavily — credit usage from the documented `GET /usage` endpoint.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TavilyConfig {
+    pub enabled: bool,
+    /// Env var name to read the key from (env wins over `api_key`).
+    pub api_key_env: String,
+    /// Inline key (fallback when the env var is unset). Chmod 600 your
+    /// config file if you put a real key here.
+    pub api_key: Option<String>,
+    /// Optional project id, sent as the `X-Project-ID` header and folded into
+    /// the cache-scope fingerprint so one project's usage is never served for
+    /// another.
+    pub project_id: Option<String>,
+}
+
+impl Default for TavilyConfig {
+    fn default() -> Self {
+        // Opt-in like DeepSeek/Kimi: requires an explicit API key.
+        Self {
+            enabled: false,
+            api_key_env: "TAVILY_API_KEY".to_string(),
+            api_key: None,
+            project_id: None,
         }
     }
 }
@@ -983,6 +1012,7 @@ impl Config {
             self.grok.api_key.as_deref(),
             self.anthropic_api.api_key.as_deref(),
             self.opencode_go.api_key.as_deref(),
+            self.tavily.api_key.as_deref(),
         ]
         .into_iter()
         .chain(
@@ -1037,6 +1067,7 @@ impl Config {
             VendorId::Kiro => self.kiro.enabled,
             VendorId::NousResearch => self.nous.enabled,
             VendorId::OpenCodeGo => self.opencode_go.enabled,
+            VendorId::Tavily => self.tavily.enabled,
         }
     }
 
@@ -1089,6 +1120,13 @@ impl Config {
         if self.supergrok.grok_binary.as_os_str().is_empty() {
             return Err(AppError::Other(
                 "[supergrok] grok_binary must not be empty".into(),
+            ));
+        }
+        if let Some(project) = &self.tavily.project_id
+            && project.trim().is_empty()
+        {
+            return Err(AppError::Other(
+                "[tavily] project_id must not be empty or whitespace; remove the field to query the account scope".into(),
             ));
         }
         let mut labels = HashSet::new();
@@ -1253,6 +1291,7 @@ mod tests {
             VendorId::Cursor,
             VendorId::Minimax,
             VendorId::Kiro,
+            VendorId::Tavily,
         ] {
             assert!(!c.is_enabled(opt_in), "{opt_in:?}");
         }
@@ -1266,6 +1305,18 @@ mod tests {
         assert!(!config.is_enabled(VendorId::OpenCodeGo));
         assert_eq!(config.opencode_go.api_key_env, "OPENCODE_GO_API_KEY");
         assert!(config.opencode_go.api_key.is_none());
+        assert!(!config.is_enabled(VendorId::Tavily));
+        assert_eq!(config.tavily.api_key_env, "TAVILY_API_KEY");
+        assert!(config.tavily.api_key.is_none());
+        assert!(config.tavily.project_id.is_none());
+    }
+
+    #[test]
+    fn tavily_whitespace_project_id_is_rejected() {
+        let mut config = Config::default();
+        config.tavily.project_id = Some("   ".into());
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("project_id"), "{err}");
     }
 
     #[cfg(unix)]
@@ -1273,6 +1324,14 @@ mod tests {
     fn opencode_go_inline_key_is_protected_like_other_api_keys() {
         let mut config = Config::default();
         config.opencode_go.api_key = Some("<redacted>".to_string());
+        assert!(config.has_inline_api_keys());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tavily_inline_key_is_protected_like_other_api_keys() {
+        let mut config = Config::default();
+        config.tavily.api_key = Some("<redacted>".to_string());
         assert!(config.has_inline_api_keys());
     }
 
