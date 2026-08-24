@@ -1,12 +1,14 @@
-//! Interactive TUI — one tab per enabled vendor, plus one extra tab per
-//! configured Anthropic account (`[[anthropic.accounts]]`, issues #14/#17).
+//! Interactive TUI — one tab per configured, enabled vendor, plus one extra tab
+//! per configured Anthropic account (`[[anthropic.accounts]]`, issues #14/#17).
 //!
 //! Controls:
-//!   Tab / l / →   next tab
-//!   Shift+Tab / h / ←   prev tab
+//!   ↑ / ↓           move through the vendor menu (wraps; mouse clicks work too)
+//!   Tab / l / →     next tab (secondary)
+//!   Shift+Tab / h / ←   prev tab (secondary)
 //!   r   refresh active tab
 //!   R   refresh all tabs
 //!   c   local Claude Code context sessions (when enabled)
+//!   s   settings overlay (mouse clicks select fields)
 //!   q / Esc / Ctrl-C   quit
 
 use std::io;
@@ -24,6 +26,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -212,6 +215,11 @@ where
                         return; // receiver gone: the TUI is shutting down.
                     }
                 }
+                Ok(Event::Mouse(m)) => {
+                    if input_tx.send(InputEvent::Mouse(m)).is_err() {
+                        return;
+                    }
+                }
                 Ok(Event::Resize(cols, rows)) => {
                     if input_tx.send(InputEvent::Resize { cols, rows }).is_err() {
                         return;
@@ -263,7 +271,7 @@ where
                     last_config_stamp = now;
                 }
             }
-            // Keyboard + resize, delivered by the single reader thread.
+            // Keyboard + mouse + resize, delivered by the single reader thread.
             maybe_input = input_rx.recv() => {
                 let Some(input) = maybe_input else {
                     return Ok(()); // reader thread ended: stdin closed.
@@ -279,6 +287,21 @@ where
                         // ioctl error) must not tear down the whole TUI — the
                         // next successful resize or redraw recovers.
                         let _ = terminal.resize(Rect::new(0, 0, cols, rows));
+                        continue;
+                    }
+                    InputEvent::Mouse(m) => {
+                        if let Some(action) = handle_mouse(app, &m)
+                            && apply_settings_action(
+                                action,
+                                app,
+                                config,
+                                client,
+                                &tx,
+                                &mut last_config_stamp,
+                            )
+                        {
+                            return Ok(());
+                        }
                         continue;
                     }
                     InputEvent::Key(k) => k,
@@ -313,25 +336,17 @@ where
                     }
                     // Settings overlay consumes all keys when open.
                     if let Some(s) = app.settings.as_mut() {
-                        use ai_usagebar::tui::settings::{Action as SAction, handle_key as shandle};
-                        match shandle(s, k.code, k.modifiers) {
-                            SAction::Continue => {}
-                            SAction::Close => app.settings = None,
-                            SAction::SavedAndClose => {
-                                app.settings = None;
-                                // Reload config and rebuild the tab set so a
-                                // just-saved primary / account / vendor / API-key
-                                // change takes effect without a restart, snapping
-                                // to the configured primary since the user just
-                                // asked for it. A broken reload keeps the current
-                                // config rather than reverting to defaults.
-                                if reload_config(app, config, client, &tx, true) {
-                                    // The save just rewrote config.toml; adopt its
-                                    // new stamp so the poll doesn't reload again.
-                                    last_config_stamp = config_stamp();
-                                }
-                            }
-                            SAction::Quit => return Ok(()),
+                        use ai_usagebar::tui::settings::handle_key as shandle;
+                        let action = shandle(s, k.code, k.modifiers);
+                        if apply_settings_action(
+                            action,
+                            app,
+                            config,
+                            client,
+                            &tx,
+                            &mut last_config_stamp,
+                        ) {
+                            return Ok(());
                         }
                         continue;
                     }
@@ -391,6 +406,7 @@ where
 /// Crossterm events the dedicated reader thread forwards into the async loop.
 enum InputEvent {
     Key(event::KeyEvent),
+    Mouse(event::MouseEvent),
     Resize { cols: u16, rows: u16 },
 }
 
@@ -472,14 +488,155 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             app.quit = true;
             true
         }
-        KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
+        // Up/Down are the primary vendor-menu keys (vertical navigation);
+        // Tab/l/←/→ remain as secondary aliases.
+        KeyCode::Down | KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
             app.next_tab();
             false
         }
-        KeyCode::BackTab | KeyCode::Char('h') | KeyCode::Left => {
+        KeyCode::Up | KeyCode::BackTab | KeyCode::Char('h') | KeyCode::Left => {
             app.prev_tab();
             false
         }
         _ => false,
+    }
+}
+
+/// Hit-test a mouse click against the rects the last draw recorded. Returns a
+/// Settings action when the click landed on the settings overlay's save row
+/// (the caller applies it), `None` when the click was consumed by focus/selection
+/// or hit nothing interactive.
+fn handle_mouse(
+    app: &mut App,
+    m: &event::MouseEvent,
+) -> Option<ai_usagebar::tui::settings::Action> {
+    use ai_usagebar::tui::settings::{Focus as SFocus, SettingsRow};
+    use ratatui::layout::Position;
+
+    if m.kind != MouseEventKind::Down(MouseButton::Left) {
+        return None;
+    }
+    let pos = Position::new(m.column, m.row);
+
+    if let Some(s) = app.settings.as_mut() {
+        let hit = app.hit.borrow();
+        let (row, _) = hit
+            .settings_rows
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))?;
+        let row = *row;
+        drop(hit);
+        match row {
+            SettingsRow::MoreHeader => {
+                s.toggle_more();
+                None
+            }
+            SettingsRow::Focus(SFocus::Save) => {
+                // A click on Save is a save: move focus there and fire Enter
+                // through the normal key handler so save logic stays in one
+                // place and the returned action flows back to the loop.
+                s.focus = SFocus::Save;
+                Some(ai_usagebar::tui::settings::handle_key(
+                    s,
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                ))
+            }
+            SettingsRow::Focus(focus) => {
+                s.focus = focus;
+                None
+            }
+        }
+    } else {
+        let hit = app.hit.borrow();
+        let (target, _) = hit
+            .nav_entries
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))?;
+        let target = *target;
+        drop(hit);
+        app.nav_from_target(target);
+        None
+    }
+}
+
+/// Apply a settings overlay action. Returns `true` when the loop should quit.
+fn apply_settings_action(
+    action: ai_usagebar::tui::settings::Action,
+    app: &mut App,
+    config: &mut Config,
+    client: &Client,
+    tx: &mpsc::UnboundedSender<(u64, TabId, TabState)>,
+    last_config_stamp: &mut Option<ConfigStamp>,
+) -> bool {
+    use ai_usagebar::tui::settings::Action as SAction;
+    match action {
+        SAction::Continue => false,
+        SAction::Close => {
+            app.settings = None;
+            false
+        }
+        SAction::SavedAndClose => {
+            app.settings = None;
+            // Reload config and rebuild the tab set so a just-saved primary /
+            // account / vendor / API-key change takes effect without a
+            // restart, snapping to the configured primary since the user just
+            // asked for it. A broken reload keeps the current config rather
+            // than reverting to defaults.
+            if reload_config(app, config, client, tx, true) {
+                // The save just rewrote config.toml; adopt its new stamp so
+                // the poll doesn't reload again.
+                *last_config_stamp = config_stamp();
+            }
+            false
+        }
+        SAction::Quit => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ai_usagebar::theme::Theme;
+
+    fn app_with_two() -> App {
+        App::with_theme(
+            vec![
+                TabId::vendor(ai_usagebar::vendor::VendorId::Anthropic),
+                TabId::vendor(ai_usagebar::vendor::VendorId::Openai),
+            ],
+            Theme::default(),
+        )
+    }
+
+    #[test]
+    fn up_down_navigate_the_vendor_menu() {
+        let mut app = app_with_two();
+        app.overview = true;
+        assert!(!handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE));
+        assert!(!app.overview);
+        assert_eq!(app.active, 0);
+        assert!(!handle_key(&mut app, KeyCode::Up, KeyModifiers::NONE));
+        assert!(app.overview);
+        // Secondary aliases still work.
+        assert!(!handle_key(&mut app, KeyCode::Tab, KeyModifiers::NONE));
+        assert!(!app.overview);
+        assert_eq!(app.active, 0);
+        assert!(!handle_key(&mut app, KeyCode::BackTab, KeyModifiers::NONE));
+        assert!(app.overview);
+    }
+
+    #[test]
+    fn quit_keys_still_quit() {
+        let mut app = app_with_two();
+        assert!(handle_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(app.quit);
+        let mut app = app_with_two();
+        assert!(handle_key(
+            &mut app,
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL
+        ));
+        assert!(app.quit);
     }
 }
