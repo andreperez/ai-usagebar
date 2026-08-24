@@ -116,6 +116,7 @@ Define the implementation contract for adding five official usage providers as f
 - **NFR-007 — Testability**: All I/O behind injectable seams (`Cache::at`, `fetch_at` with `Endpoints` override, clock injection for month-to-date bounds, `candidate_bases_with`); hermetic tests never touch real `$HOME`/`$XDG`/credential paths; live tests are `#[ignore]` and credential-gated.
 - **NFR-008 — Observability**: Sanitized warnings visible in TUI panel, `usage` text report, tooltip and JSON `sections`; `.last_error` holds `(code, sanitized_message)` for post-mortem without credential leakage.
 - **NFR-009 — Accessibility**: Keyboard navigation must remain complete without a mouse (Up/Down + wrap navigate the vendor menu; Settings remains fully keyboard-operable). Mouse is an addition, never a requirement. Contrast and focus indicators are preserved.
+- **NFR-010 — Active-scope compatibility**: Absent `ui.active_vendors` preserves legacy enabled-and-configured automatic fetch behavior. Once Settings writes an explicit list, automatic TUI, report, and widget-cycle fetches are limited to that list; explicit `--vendor` remains available for diagnostics.
 
 ## 3.8 User Interface Requirements (TUI navigation, mouse, provider visibility)
 
@@ -129,10 +130,13 @@ every API-key vendor unconditionally.
 
 - **REQ-039**: The system shall navigate the vendor menu (the selectable ring `[Overview, tab0, tab1, …]`) with the Up and Down arrow keys with wrap-around, keeping `Tab`/`Shift+Tab`/`l`/`h`/`Left`/`Right` as secondary aliases.
 - **REQ-040**: The system shall process mouse events in the TUI event loop: a click on a vendor menu entry shall select that provider, a click on a Settings overlay field shall move focus to it, and clicks outside interactive areas shall be ignored.
-- **REQ-041**: The system shall list in the vendor menu and the Overview only configured providers — a provider enabled in config without a resolvable credential (no environment key and no inline key) shall not appear as a selectable entry.
+- **REQ-041**: The system shall list in the vendor menu and the Overview only providers in the automatic active scope: enabled, credential-resolvable providers filtered by `ui.active_vendors` when that list is configured. A provider enabled without a resolvable credential shall not appear as a selectable entry.
 - **REQ-042**: The system shall keep the Settings overlay as the configuration surface for every API-key provider, but shall group or collapse providers that are neither configured nor enabled (e.g., a "Configured" section plus a collapsed "More providers" section) so unconfigured entries do not dominate the screen.
-- **REQ-043**: The system shall preserve the existing behavior of showing enabled-and-failing providers with their error state in the vendor menu; only unconfigured providers (no credential source) are hidden.
+- **REQ-043**: The system shall preserve the existing behavior of showing selected-and-failing providers with their error state in the vendor menu; only providers outside the active scope or without a credential source are hidden.
 - **REQ-044**: The system shall update the TUI key-hints footer and `README.md` TUI controls to reflect Up/Down and mouse navigation without breaking existing shortcuts.
+- **REQ-045**: The system shall support optional `[ui] active_vendors = ["<vendor-id>", …]` as the explicit automatic fetch/display scope for TUI tabs, Overview, `usage --json`, widget cycling, and implicit widget vendor resolution. When the field is absent, the system shall preserve legacy enabled-and-configured behavior; an empty list shall disable automatic fetches while retaining explicit `--vendor` one-off checks.
+- **REQ-046**: The Settings overlay shall render configured active-provider candidates as keyboard- and mouse-operable checkboxes. Toggling a checkbox shall update the selected scope; entering and saving a non-empty API key shall add that provider to the active scope, and clearing a key shall remove it.
+- **REQ-047**: The system shall allow explicit `--vendor <id>` to bypass `ui.active_vendors`, while still requiring the provider's normal credential resolution, so one-off diagnostics do not expand background fetch scope.
 
 # 4. Constraints & Guidelines
 
@@ -558,7 +562,7 @@ Balance-only placeholders render as `Text` (`$D.CC`) or `Block`; no fake `Metric
 }
 ```
 
-Ordering is `VendorId::all()` filtered by `enabled` plus real `fetched_at`/`reset_at` RFC 3339; `metrics` is the `Metric`-only projection of `sections`.
+Ordering is the configured `ui.active_vendors` scope (or legacy enabled-and-configured fallback) plus real `fetched_at`/`reset_at` RFC 3339; `metrics` is the `Metric`-only projection of `sections`.
 
 # 7. Acceptance Criteria
 
@@ -582,11 +586,13 @@ Ordering is `VendorId::all()` filtered by `enabled` plus real `fetched_at`/`rese
 - **AC-018**: Given a partial snapshot with age < 5 minutes, When the caller requests again, Then the system serves the partial snapshot and defers the secondary retry until the 5-minute horizon expires.
 - **AC-019**: Given `usage --json` with all five new vendors enabled, When rendering JSON, Then entries appear in canonical `VendorId::all()` order, each `Metric` carries `severity` and absolute `reset_at`, and balance-only rows appear as `Text`/`Block` with no fabricated `percent`.
 - **AC-020**: Given a Windows install with `%USERPROFILE%\.claude\.credentials.json`, When resolving home, Then `directories::BaseDirs` resolves via `%USERPROFILE%` and `ai-usagebar.exe` + `ai-usagebar-tui.exe` read that path while TUI/config remain portable.
-- **AC-021**: Given the TUI with a vendor menu of N entries (Overview + enabled providers), When the user presses Down at the last entry, Then the selection wraps to the first entry; pressing Up wraps the other way.
+- **AC-021**: Given the TUI with a vendor menu of N entries (Overview + active providers), When the user presses Down at the last entry, Then the selection wraps to the first entry; pressing Up wraps the other way.
 - **AC-022**: Given the TUI with mouse capture active, When the user clicks a vendor menu entry, Then that provider becomes the active tab; a click on a Settings overlay field moves focus to that field.
 - **AC-023**: Given a provider enabled in config with no resolvable credential, When the TUI builds the vendor menu and Overview, Then that provider is absent from both; it appears in the Settings overlay marked as unconfigured ("key missing").
 - **AC-024**: Given the Settings overlay with several unconfigured API-key providers, When it opens, Then unconfigured entries are grouped or collapsed so they do not dominate the screen while remaining reachable for configuration.
-- **AC-025**: Given an enabled provider whose fetch fails, When the TUI builds the vendor menu, Then that provider still appears with its error state (existing behavior preserved — only unconfigured providers are hidden).
+- **AC-025**: Given an active provider whose fetch fails, When the TUI builds the vendor menu, Then that provider still appears with its error state (existing behavior preserved — only providers outside the active scope or unconfigured providers are hidden).
+- **AC-026**: Given `[ui] active_vendors = ["firecrawl"]` and a resolvable Firecrawl key, When the TUI, `usage --json`, or widget default refreshes, Then only Firecrawl is fetched and displayed; a direct `--vendor anthropic` remains a one-off explicit check.
+- **AC-027**: Given an active-provider checkbox in Settings, When the user clicks it or presses Space/Enter while it is focused, Then the provider is added to or removed from the persisted `ui.active_vendors` list without deleting its key.
 
 # 8. Test Automation Strategy
 

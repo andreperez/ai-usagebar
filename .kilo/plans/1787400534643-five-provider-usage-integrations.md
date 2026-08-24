@@ -176,19 +176,21 @@ Official documentation is authoritative. Before implementing each slice, recheck
 - Follow `CLAUDE.md` only when cutting a release; provider work alone must not opportunistically change version/package artifacts (`Cargo.toml` version, `manifest.json`, PKGBUILDs, `.SRCINFO`s, `CHANGELOG` compare links are release-only).
 - **REV**: Verify Windows portability: `cargo build --release` on Windows produces `ai-usagebar.exe` + `ai-usagebar-tui.exe`; config path resolves via `directories::ProjectDirs` (`%APPDATA%` fallback), not hard-coded `~/.config`.
 
-### 10. TUI Navigation & Provider Visibility  ✅ (done 2026-08-23; user request, took priority over Firecrawl)
+### 10. TUI Navigation & Provider Visibility  ✅ (expanded 2026-08-24 with explicit active scope)
 
-Targets the ratatui TUI (`src/bin/ai-usagebar-tui.rs`, `src/tui/app.rs`, `src/tui/settings.rs`). GNOME/KDE/Omarchy and the macOS menu bar are already mouse-driven and data-driven from `usage --json`, so they need no change; the macOS menubar is unaffected. Requirements are codified in spec §3.8 (REQ-039..043) and AC-021..025.
+Targets the ratatui TUI (`src/bin/ai-usagebar-tui.rs`, `src/tui/app.rs`, `src/tui/settings.rs`). GNOME/KDE/Omarchy and the macOS menu bar are data-driven from `usage --json`, so they automatically receive only active providers. Requirements are codified in spec §3.8 (REQ-039..047) and AC-021..027.
 
 - [x] Remap the vendor navigation (the selectable ring `[Overview, tab0, tab1, …]`) to **Up/Down arrows** with wrap-around, keeping `Tab`/`Shift+Tab`/`l`/`h`/`←`/`→` as secondary aliases. `handle_key` in `src/bin/ai-usagebar-tui.rs:481`.
 - [x] Enable mouse handling in the event loop: `Event::Mouse` is forwarded via `InputEvent::Mouse`; clicks hit-test against rects recorded by the draw pass (`App.hit: Rc<RefCell<HitTargets>>`). A click on a vendor navigation entry selects it; a click on a Settings field focuses it; a click on **Save** triggers the save flow; the collapsed "More providers" header expands on click.
 - [x] Filter the vendor navigation and the Overview to **configured** providers via `Config::is_configured` (env var or inline key; OpenRouter also counts named-account keys; OAuth/local vendors are configured when enabled). An enabled vendor with no resolvable credential is no longer a tab (REQ-041).
+- [x] Add optional `[ui] active_vendors` as the explicit automatic fetch/display scope. When set, it controls TUI tabs/Overview, `usage --json`, widget cycling and implicit widget resolution; when absent, enabled-and-configured behavior remains for compatibility. Explicit `--vendor` remains a one-off override (REQ-045/047).
+- [x] Add a **Dashboard providers** checkbox section to Settings. Mouse click or Space/Enter toggles a configured provider; saving a new key selects it, clearing one removes it from the active scope. Selected providers with live fetch errors remain visible (REQ-046).
 - [x] Group unconfigured key vendors in the Settings overlay: configured rows first, then a collapsed "More providers (N)" header. Navigating down past the last configured row (or clicking the header) expands the section; navigating back up past its first row collapses it. Enabled-and-failing providers keep their error state (REQ-043).
 - [x] Update the TUI key-hints footer (Up/Down + mouse), the binary header comment, and `README.md` TUI controls (REQ-044).
-- [x] Tests: bin `handle_key` Up/Down + quit; app `nav_from_target`/select + empty-hit defaults; view sidebar/top-nav hit rects + settings grouping/draw hits; settings ring boundary expand/collapse + `toggle_more` + `from_config` configured markers; config `is_configured` (inline/env/accounts). 1093 lib + 2 bin + 3 e2e tests green.
+- [x] Tests: bin `handle_key` Up/Down + quit + Dashboard checkbox mouse toggle; app `nav_from_target`/select + empty-hit defaults + explicit active scope; view sidebar/top-nav hit rects + settings grouping/draw hits; settings ring boundary expand/collapse + `toggle_more` + active checkbox/persistence/bridge tests; config `is_configured` and `active_vendors` (inline/env/accounts). 1117 lib + 3 bin + 3 e2e tests green.
 - [x] Validation: `cargo fmt --all -- --check`, `cargo clippy --all-targets` (only pre-existing Windows-only `cfg(unix)` nous warnings), `cargo test --all-targets --locked`, `make desktop-test`, `cargo machete` all green.
 
-**Slice notes**: `Rect::contains(Position)` from ratatui-core 0.1.2. Mouse works for both `Sidebar` and `Navbar` vendor-box styles; `VendorBoxStyle::None` records no nav hits. The `usage --json` contract is unchanged (filtering is TUI-only per REQ-041).
+**Slice notes**: `Rect::contains(Position)` from ratatui-core 0.1.2. Mouse works for both `Sidebar` and `Navbar` vendor-box styles; `VendorBoxStyle::None` records no nav hits. `ui.active_vendors` deliberately changes automatic `usage --json` scope so adapters receive only providers the user selected; the JSON entry schema remains additive and unchanged.
 
 ## Rollback Strategy
 

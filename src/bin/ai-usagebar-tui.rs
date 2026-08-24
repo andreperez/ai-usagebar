@@ -542,6 +542,11 @@ fn handle_mouse(
                     KeyModifiers::NONE,
                 ))
             }
+            SettingsRow::Focus(SFocus::Active(index)) => {
+                s.focus = SFocus::Active(index);
+                s.toggle_active(index);
+                None
+            }
             SettingsRow::Focus(focus) => {
                 s.focus = focus;
                 None
@@ -638,5 +643,42 @@ mod tests {
             KeyModifiers::CONTROL
         ));
         assert!(app.quit);
+    }
+
+    #[test]
+    fn clicking_dashboard_provider_checkbox_toggles_active_scope() {
+        use ai_usagebar::tui::settings::{
+            Focus, KEY_VENDORS, KeyInput, SettingsRow, SettingsState,
+        };
+        use ai_usagebar::vendor::VendorId;
+        use ratatui::layout::Rect;
+
+        let mut app = app_with_two();
+        app.settings = Some(SettingsState {
+            focus: Focus::Primary,
+            primary_choices: vec![VendorId::Anthropic],
+            primary: VendorId::Anthropic,
+            active_choices: vec![VendorId::Anthropic, VendorId::Openai],
+            active_vendors: vec![VendorId::Anthropic],
+            keys: KEY_VENDORS.iter().map(|_| KeyInput::default()).collect(),
+            status: String::new(),
+            configured: vec![true; KEY_VENDORS.len()],
+            show_more: false,
+        });
+        app.hit.borrow_mut().settings_rows =
+            vec![(SettingsRow::Focus(Focus::Active(1)), Rect::new(0, 0, 20, 1))];
+        let click = event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(handle_mouse(&mut app, &click).is_none());
+        let state = app.settings.as_ref().unwrap();
+        assert_eq!(state.focus, Focus::Active(1));
+        assert_eq!(
+            state.active_vendors,
+            vec![VendorId::Anthropic, VendorId::Openai]
+        );
     }
 }

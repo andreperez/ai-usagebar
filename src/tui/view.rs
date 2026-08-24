@@ -727,6 +727,8 @@ mod tests {
             focus: SFocus::Primary,
             primary_choices: vec![VendorId::Anthropic],
             primary: VendorId::Anthropic,
+            active_choices: vec![VendorId::Anthropic],
+            active_vendors: vec![VendorId::Anthropic],
             keys,
             status: String::new(),
             configured,
@@ -742,6 +744,11 @@ mod tests {
             hit.settings_rows
                 .iter()
                 .any(|(row, _)| matches!(row, SettingsRow::MoreHeader))
+        );
+        assert!(
+            hit.settings_rows
+                .iter()
+                .any(|(row, _)| matches!(row, SettingsRow::Focus(SFocus::Active(0))))
         );
         assert!(
             hit.settings_rows

@@ -4,7 +4,7 @@
 //! The widget answers "how is *this* vendor doing" one process at a time, which
 //! is what a status bar needs and what a person checking on four Claude
 //! accounts does not. This walks the same tab set the TUI builds — every
-//! enabled vendor, plus one entry per named Claude account — and prints what
+//! active provider, plus one entry per named Claude account — and prints what
 //! each one has left.
 //!
 //! Deliberately thin: [`crate::tui::app::tabs_from_config`] already decides
@@ -93,7 +93,7 @@ pub async fn run(json: bool) -> i32 {
     let tabs = tabs_with_desktop(&config);
     if tabs.is_empty() {
         eprintln!(
-            "ai-usagebar usage: no vendors enabled in {}",
+            "ai-usagebar usage: no active configured providers in {}",
             crate::config::config_path_hint()
         );
         return 1;

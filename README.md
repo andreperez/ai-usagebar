@@ -544,18 +544,22 @@ make clippy                                        # cargo clippy -D warnings
 
 - `↑` / `↓` — move through the vendor menu (wraps; `Tab`/`l`/`→` and
   `Shift+Tab`/`h`/`←` still work as secondary shortcuts)
-- Mouse — click a vendor menu entry to select it; in Settings, click a field to
-  focus it or click **Save** to save
+- Mouse — click a vendor menu entry to select it; in Settings, click a
+  Dashboard provider checkbox to toggle it, a field to focus it, or **Save**
+  to save
 - `r` — refresh active tab
 - `R` — refresh all tabs
-- `s` — open Settings overlay (primary vendor + API keys)
+- `s` — open Settings overlay (primary vendor + Dashboard providers + API keys)
 - `c` — open local Claude context sessions (only when `[context] enabled = true`); `v` cycles its layout
 - `q` / `Esc` / `Ctrl-C` — quit
 
-The vendor menu and Overview show only **configured** providers — a provider
-enabled in config without a key is hidden until you configure it in Settings,
-where unconfigured vendors are grouped under a collapsed "More providers"
-section.
+The vendor menu, Overview, `usage --json`, widget cycling, and implicit widget
+selection use **Dashboard providers**. Settings persists this explicit scope as
+`[ui] active_vendors`; unlisted providers keep their keys but receive no
+automatic fetch. If the setting is absent, existing configurations retain the
+legacy enabled-and-configured behavior. A direct `--vendor <id>` command remains
+a one-off check. Providers with no key are hidden until configured in Settings,
+where they are grouped under a collapsed "More providers" section.
 
 The TUI refreshes every 60 seconds. During a refresh it keeps the current values
 visible with a `↻` marker. If the request fails, the last snapshot remains on
@@ -615,6 +619,8 @@ Context options remain in TOML rather than the Settings modal.
 Press `s` while the TUI is open. The overlay lets you:
 
 - Pick the **primary vendor** that the widget defaults to and that the TUI selects on startup. Use `←` / `→` to cycle.
+- Toggle **Dashboard providers**. Checked providers are the only automatic
+  refresh/display scope; unchecking a provider leaves its configured key intact.
 - Enter a key for any supported API-key provider. Keys are masked as you type;
   press `Ctrl-V` to reveal or hide them. The provider's configured environment
   variable still wins at runtime; the inline key is the fallback. Saving a
@@ -624,6 +630,7 @@ Key bindings inside the overlay:
 
 - `Tab` / `↑↓` — move between fields
 - `←` / `→` — cycle primary-vendor selection (only on the vendor field)
+- `Space` / `Enter` — toggle the focused Dashboard provider
 - `Ctrl-V` — toggle key visibility on the focused key field
 - `Ctrl-S` — save and close
 - `Esc` — discard and close

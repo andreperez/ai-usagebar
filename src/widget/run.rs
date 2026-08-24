@@ -51,7 +51,7 @@ pub async fn run(cli: Cli) -> i32 {
     0
 }
 
-/// Cycle to the next/prev enabled vendor and signal waybar to refresh.
+/// Cycle to the next/prev active vendor and signal Waybar to refresh.
 /// Always exits 0 — Waybar swallows non-zero exits anyway.
 async fn run_cycle(cli: &Cli) -> i32 {
     // Cycling against the *default* vendor set because the config failed to
@@ -60,22 +60,22 @@ async fn run_cycle(cli: &Cli) -> i32 {
     let Ok(config) = Config::load() else {
         return 0;
     };
-    let enabled = config.enabled_vendors();
-    if enabled.is_empty() {
+    let active = config.active_vendors();
+    if active.is_empty() {
         return 0;
     }
     // Starting point: current persisted vendor, else config.primary, else
     // anthropic. resolved_vendor() encodes that precedence, minus the
     // `cli.vendor` override (cycle commands ignore --vendor on purpose).
     let start = match config.ui.primary {
-        Some(id) if enabled.contains(&id) => id,
-        _ => enabled[0],
+        Some(id) if active.contains(&id) => id,
+        _ => active[0],
     };
     let delta = if cli.cycle_next { 1 } else { -1 };
     // Signalling after a *failed* persist told Waybar to re-render a selection
     // that was never written, so the bar redrew the same vendor and the scroll
     // looked like it had been swallowed. Only announce a change that happened.
-    if crate::active::cycle(&enabled, start, delta).is_err() {
+    if crate::active::cycle(&active, start, delta).is_err() {
         return 0;
     }
 
@@ -185,7 +185,7 @@ fn validate_vendor_options(cli: &Cli, vendor: Vendor) -> Result<()> {
 /// explicit `--vendor` is an intentional CLI opt-in, including for vendors
 /// that default to disabled (such as Kimi).
 fn dispatch_is_eligible(cli: &Cli, config: &Config, vendor: Vendor) -> bool {
-    cli.has_explicit_vendor() || config.is_enabled(vendor.to_id())
+    cli.has_explicit_vendor() || config.active_vendors().contains(&vendor.to_id())
 }
 
 /// Nous Research authenticates with the independent OAuth credential store.

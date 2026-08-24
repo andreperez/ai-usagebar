@@ -7,13 +7,18 @@ settings.
 
 ```toml
 [ui]
-# Which vendor the widget shows when --vendor is omitted, AND which tab
-# is selected when the TUI opens. Defaults to anthropic when not set.
-# Only a vendor that is enabled can be primary.
+# Explicit automatic fetch/display scope. When set, only these configured,
+# enabled providers appear in the TUI/Overview, `usage --json`, and widget
+# cycling/default selection. Unlisted provider keys remain saved but are not
+# fetched automatically. Omit to preserve legacy enabled-provider behavior.
+# active_vendors = ["anthropic", "openai", "firecrawl"]
+# Which active vendor the widget shows when --vendor is omitted, AND which tab
+# is selected when the TUI opens. Defaults to the first active provider.
+# Only an active vendor can be primary.
 # primary = "anthropic"   # anthropic | anthropic_api | openai | zai
 #                         # | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | antigravity | cursor
-#                         # | minimax | kiro
+#                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui

@@ -6,16 +6,21 @@
 # are the safer choice.
 
 [ui]
-# Which vendor the widget shows when `--vendor` is omitted, AND which tab
-# is selected when the TUI opens. Comment out to default to Anthropic.
+# Explicit automatic fetch/display scope. When set, only these configured,
+# enabled providers appear in the TUI/Overview, `usage --json`, and widget
+# cycling/default selection. Keys remain saved for unlisted providers, but no
+# background fetch occurs. Omit to preserve legacy enabled-provider behavior.
+# active_vendors = ["anthropic", "openai", "firecrawl"]
+# Which active vendor the widget shows when `--vendor` is omitted, AND which tab
+# is selected when the TUI opens. Comment out to default to the first active provider.
 # Valid: anthropic | anthropic_api | openai | zai | openrouter | deepseek
 #        | kimi | kilo | novita | moonshot | grok | supergrok | antigravity
-#        | cursor | minimax | kiro | nous | opencode-go
+#        | cursor | minimax | kiro | nous | opencode-go | tavily | firecrawl
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
 # Which vendors the Overview lists (the TUI's first tab / the macOS menu-bar's
-# top section), in this order. Omit for every enabled vendor.
+# top section), in this order. Omit for every active vendor.
 # overview_vendors = ["anthropic", "cursor", "openai"]
 # Presentation of vendor tab navigation: sidebar (vertical box) | navbar (top strip) | none (hidden).
 # Default sidebar (falls back to navbar on narrow terminals).

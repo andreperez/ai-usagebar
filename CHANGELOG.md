@@ -20,11 +20,12 @@ Each release is also published at
   with `Tab`/`Shift+Tab`/`l`/`h`/`←`/`→` kept as secondary shortcuts. Mouse
   clicks work in the TUI: click a vendor menu entry to select it, click a
   Settings field to focus it, or click **Save** to save.
-- The TUI vendor menu and Overview list only **configured** providers: a
-  provider enabled in config without a key no longer appears as a tab. In the
-  Settings overlay, unconfigured key vendors are grouped under a collapsed
-  "More providers" section (navigate past the last configured row or click the
-  header to expand).
+- The Settings overlay now includes **Dashboard providers** checkboxes. Its
+  persisted `[ui] active_vendors` list controls automatic TUI/Overview,
+  `usage --json`, widget-cycle, and implicit-widget fetches. Unlisted provider
+  keys stay saved without background fetch; direct `--vendor` remains a
+  one-off override. Unconfigured key vendors remain grouped under collapsed
+  **More providers**.
 - Firecrawl team credit usage from the documented v2 billing endpoints:
   remaining credits, plan credits, matching historical billing-period usage,
   and reset metadata. Historical usage is optional and never suppresses live

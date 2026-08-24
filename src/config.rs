@@ -61,16 +61,21 @@ pub struct Config {
     pub firecrawl: FirecrawlConfig,
 }
 
-/// UI / dispatch preferences. Currently just `primary` — which vendor the
-/// widget shows when `--vendor` is omitted, and which TUI tab is selected
-/// at startup.
+/// UI / dispatch preferences: active providers control automatic refresh and
+/// presentation, while `primary` selects the initial widget/TUI provider.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct UiConfig {
-    /// `None` → fall back to anthropic for backward compatibility.
+    /// `None` → fall back to the first active provider for backward compatibility.
     pub primary: Option<VendorId>,
+    /// Explicit provider scope for automatic fetches: TUI tabs/Overview,
+    /// `usage --json`, and widget cycling/default resolution. `None` preserves
+    /// legacy behavior (every enabled, configured provider). `Some([])` is a
+    /// valid deliberate choice that disables automatic provider fetches while
+    /// retaining explicit `--vendor` fetches.
+    pub active_vendors: Option<Vec<VendorId>>,
     /// Which vendors the Overview shows (the TUI's first tab and the macOS
-    /// menu-bar's top section), in this order. `None` → every enabled vendor,
+    /// menu-bar's top section), in this order. `None` → every active vendor,
     /// in the canonical order.
     pub overview_vendors: Option<Vec<VendorId>>,
     /// Layout style for vendor navigation in the TUI: sidebar | navbar | none.
@@ -1170,10 +1175,41 @@ impl Config {
             .collect()
     }
 
+    /// Providers in the automatic fetch/display scope. A configured explicit
+    /// `ui.active_vendors` list wins; absent that list, preserve the historic
+    /// enabled-and-configured behavior. Explicit `--vendor` remains outside
+    /// this scope so a user can run a one-off check without selecting it.
+    pub fn active_vendors(&self) -> Vec<VendorId> {
+        let available: Vec<VendorId> = self
+            .enabled_vendors()
+            .into_iter()
+            .filter(|id| self.is_configured(*id))
+            .collect();
+        match &self.ui.active_vendors {
+            None => available,
+            Some(selected) => selected
+                .iter()
+                .copied()
+                .filter(|id| available.contains(id))
+                .collect(),
+        }
+    }
+
     /// Validate cross-entry constraints that serde cannot express. Account
     /// labels are both CLI selectors and TUI tab identities, so duplicates
     /// would make either destination ambiguous.
     pub fn validate(&self) -> Result<()> {
+        if let Some(active) = &self.ui.active_vendors {
+            let mut seen = HashSet::new();
+            for vendor in active {
+                if !seen.insert(*vendor) {
+                    return Err(AppError::Other(format!(
+                        "[ui] active_vendors contains duplicate vendor {:?}",
+                        vendor.slug()
+                    )));
+                }
+            }
+        }
         if self.context.context_window_tokens == Some(0) {
             return Err(AppError::Other(
                 "[context] context_window_tokens must be greater than zero".into(),
@@ -1388,6 +1424,48 @@ mod tests {
             assert!(!c.is_enabled(opt_in), "{opt_in:?}");
         }
         assert_eq!(c.enabled_vendors().len(), 4);
+        assert!(c.ui.active_vendors.is_none());
+    }
+
+    #[test]
+    fn active_vendors_preserve_legacy_fallback_or_apply_explicit_selection() {
+        let mut config = Config::default();
+        config.zai.api_key = Some("test-zai".into());
+        config.openrouter.api_key = Some("test-openrouter".into());
+        assert_eq!(
+            config.active_vendors(),
+            vec![
+                VendorId::Anthropic,
+                VendorId::Openai,
+                VendorId::Zai,
+                VendorId::Openrouter,
+            ]
+        );
+
+        // Explicit lists preserve their configured order, while disabled or
+        // unconfigured entries cannot enter the automatic fetch scope.
+        config.ui.active_vendors = Some(vec![
+            VendorId::Zai,
+            VendorId::Anthropic,
+            VendorId::Firecrawl,
+        ]);
+        assert_eq!(
+            config.active_vendors(),
+            vec![VendorId::Zai, VendorId::Anthropic]
+        );
+        config.ui.active_vendors = Some(Vec::new());
+        assert!(config.active_vendors().is_empty());
+    }
+
+    #[test]
+    fn duplicate_active_vendors_are_rejected() {
+        let file = write_toml("[ui]\nactive_vendors = [\"anthropic\", \"anthropic\"]\n");
+        let error = Config::load_from(file.path()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("active_vendors contains duplicate")
+        );
     }
 
     #[test]
