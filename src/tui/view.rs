@@ -10,13 +10,33 @@ use ratatui_bubbletea_components::{Help, KeyBinding, ListItem, SelectList};
 use crate::format::local_time_hms;
 use crate::tui::app::TabId;
 use crate::tui::app::TabState;
-use crate::tui::app::{App, NavTarget};
+use crate::tui::app::{App, FooterAction, NavTarget};
 use crate::tui::panels;
 use crate::tui::style::{bubble_theme, color, severity_color};
 use crate::vendor::VendorId;
 
 const WIDE_LAYOUT_MIN_WIDTH: u16 = 86;
 const SIDEBAR_WIDTH: u16 = 28;
+const FOOTER_SEPARATOR_WIDTH: u16 = 3;
+
+#[derive(Clone, Copy)]
+struct FooterBinding {
+    action: Option<FooterAction>,
+    key: &'static str,
+    description: &'static str,
+}
+
+impl FooterBinding {
+    fn width(self) -> u16 {
+        text_width(self.key)
+            .saturating_add(1)
+            .saturating_add(text_width(self.description))
+    }
+}
+
+fn text_width(text: &str) -> u16 {
+    text.chars().count().min(u16::MAX as usize) as u16
+}
 
 pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -402,17 +422,67 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // 875x600 windows. Keep the footer to just the keybinding hints.
     let theme = bubble_theme(&app.theme);
     let mut bindings = vec![
-        KeyBinding::with_keys(["tab", "h/l"], "switch"),
-        KeyBinding::new("r", "refresh"),
-        KeyBinding::new("R", "refresh all"),
-        KeyBinding::new("s", "settings"),
+        FooterBinding {
+            action: None,
+            key: "tab/h/l",
+            description: "switch",
+        },
+        FooterBinding {
+            action: Some(FooterAction::Refresh),
+            key: "r",
+            description: "refresh",
+        },
+        FooterBinding {
+            action: Some(FooterAction::RefreshAll),
+            key: "R",
+            description: "refresh all",
+        },
+        FooterBinding {
+            action: Some(FooterAction::Settings),
+            key: "s",
+            description: "settings",
+        },
     ];
     if app.context_enabled {
-        bindings.push(KeyBinding::new("c", "context"));
+        bindings.push(FooterBinding {
+            action: None,
+            key: "c",
+            description: "context",
+        });
     }
-    bindings.push(KeyBinding::with_keys(["q", "esc"], "quit"));
-    let help = Help::new(bindings).theme(theme);
+    bindings.push(FooterBinding {
+        action: Some(FooterAction::Quit),
+        key: "q/esc",
+        description: "quit",
+    });
+    let help = Help::new(
+        bindings
+            .iter()
+            .map(|binding| KeyBinding::new(binding.key, binding.description)),
+    )
+    .theme(theme);
     f.render_widget(&help, area);
+
+    // Help renders compact bindings as "key description • ". Record the same
+    // cells so click targets stay aligned even when the footer is truncated.
+    let right = area.x.saturating_add(area.width);
+    let mut x = area.x;
+    let mut actions = Vec::new();
+    for binding in bindings {
+        let width = binding.width();
+        if let Some(action) = binding.action
+            && x < right
+        {
+            let visible_width = width.min(right.saturating_sub(x));
+            if visible_width > 0 {
+                actions.push((action, Rect::new(x, area.y, visible_width, area.height)));
+            }
+        }
+        x = x
+            .saturating_add(width)
+            .saturating_add(FOOTER_SEPARATOR_WIDTH);
+    }
+    app.hit.borrow_mut().footer_actions = actions;
 }
 
 #[cfg(test)]
@@ -704,6 +774,31 @@ mod tests {
         let (first, second) = (hit.nav_entries[0].1, hit.nav_entries[1].1);
         assert_eq!(first.x + first.width + 2, second.x);
         assert_eq!(first.y, second.y);
+    }
+
+    #[test]
+    fn footer_records_click_targets_for_mouse_actions() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let app = app_with(vec![TabState::Loading, TabState::Loading]);
+        let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+
+        let hit = app.hit.borrow();
+        assert_eq!(
+            hit.footer_actions
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            vec![
+                FooterAction::Refresh,
+                FooterAction::RefreshAll,
+                FooterAction::Settings,
+                FooterAction::Quit,
+            ]
+        );
+        assert!(hit.footer_actions.iter().all(|(_, rect)| rect.height == 1));
     }
 
     #[test]

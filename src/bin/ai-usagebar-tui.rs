@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use ai_usagebar::config::Config;
 use ai_usagebar::tui::app::{
-    ANTHROPIC_REFRESH_STAGGER, App, REFRESH_INTERVAL, TabId, TabState, refresh_one,
+    ANTHROPIC_REFRESH_STAGGER, App, FooterAction, REFRESH_INTERVAL, TabId, TabState, refresh_one,
     refresh_stagger, tabs_with_desktop,
 };
 use ai_usagebar::tui::view::draw;
@@ -290,17 +290,30 @@ where
                         continue;
                     }
                     InputEvent::Mouse(m) => {
-                        if let Some(action) = handle_mouse(app, &m)
-                            && apply_settings_action(
-                                action,
-                                app,
-                                config,
-                                client,
-                                &tx,
-                                &mut last_config_stamp,
-                            )
-                        {
-                            return Ok(());
+                        match handle_mouse(app, &m) {
+                            Some(MouseAction::Settings(action)) => {
+                                if apply_settings_action(
+                                    action,
+                                    app,
+                                    config,
+                                    client,
+                                    &tx,
+                                    &mut last_config_stamp,
+                                ) {
+                                    return Ok(());
+                                }
+                            }
+                            Some(MouseAction::Footer(FooterAction::Refresh)) => {
+                                refresh_active(app, client, config, &tx);
+                            }
+                            Some(MouseAction::Footer(FooterAction::RefreshAll)) => {
+                                spawn_all(app, client, config, &tx);
+                            }
+                            Some(MouseAction::Footer(FooterAction::Settings)) => {
+                                open_settings(app, config);
+                            }
+                            Some(MouseAction::Footer(FooterAction::Quit)) => return Ok(()),
+                            None => {}
                         }
                         continue;
                     }
@@ -352,13 +365,7 @@ where
                     }
                     // Normal key handling (settings closed).
                     if matches!(k.code, KeyCode::Char('s')) {
-                        // Prefer the file (it may have changed on disk), but fall
-                        // back to the config in memory rather than to defaults.
-                        let cfg = ai_usagebar::config::Config::load()
-                            .unwrap_or_else(|_| config.clone());
-                        app.settings = Some(
-                            ai_usagebar::tui::settings::SettingsState::from_config(&cfg),
-                        );
+                        open_settings(app, config);
                         continue;
                     }
                     if matches!(k.code, KeyCode::Char('c'))
@@ -382,13 +389,7 @@ where
                     }
                     // Refresh-on-key handling.
                     if matches!(k.code, KeyCode::Char('r')) {
-                        if app.overview {
-                            // No single active tab on the Overview — refresh all.
-                            spawn_all(app, client, config, &tx);
-                        } else if let Some(tab) = app.active_tab_id().cloned() {
-                            // A manual single-tab refresh isn't a burst — no stagger.
-                            spawn_one(app, tab, client, config, &tx, Duration::ZERO);
-                        }
+                        refresh_active(app, client, config, &tx);
                     }
                     if matches!(k.code, KeyCode::Char('R')) {
                         spawn_all(app, client, config, &tx);
@@ -408,6 +409,13 @@ enum InputEvent {
     Key(event::KeyEvent),
     Mouse(event::MouseEvent),
     Resize { cols: u16, rows: u16 },
+}
+
+/// An effect requested by a click after it has been hit-tested against the
+/// most recent draw.
+enum MouseAction {
+    Settings(ai_usagebar::tui::settings::Action),
+    Footer(FooterAction),
 }
 
 fn spawn_context_scan(
@@ -478,6 +486,28 @@ fn spawn_one(
     });
 }
 
+fn refresh_active(
+    app: &mut App,
+    client: &Client,
+    config: &Config,
+    tx: &mpsc::UnboundedSender<(u64, TabId, TabState)>,
+) {
+    if app.overview {
+        // No single active tab on the Overview — refresh all.
+        spawn_all(app, client, config, tx);
+    } else if let Some(tab) = app.active_tab_id().cloned() {
+        // A manual single-tab refresh isn't a burst — no stagger.
+        spawn_one(app, tab, client, config, tx, Duration::ZERO);
+    }
+}
+
+fn open_settings(app: &mut App, config: &Config) {
+    // Prefer the file (it may have changed on disk), but fall back to the
+    // config in memory rather than to defaults.
+    let cfg = ai_usagebar::config::Config::load().unwrap_or_else(|_| config.clone());
+    app.settings = Some(ai_usagebar::tui::settings::SettingsState::from_config(&cfg));
+}
+
 fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     match code {
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -502,14 +532,10 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     }
 }
 
-/// Hit-test a mouse click against the rects the last draw recorded. Returns a
-/// Settings action when the click landed on the settings overlay's save row
-/// (the caller applies it), `None` when the click was consumed by focus/selection
-/// or hit nothing interactive.
-fn handle_mouse(
-    app: &mut App,
-    m: &event::MouseEvent,
-) -> Option<ai_usagebar::tui::settings::Action> {
+/// Hit-test a mouse click against the rects the last draw recorded. Returns an
+/// action only when the event needs work from the event loop; focus and tab
+/// selection mutate `app` directly.
+fn handle_mouse(app: &mut App, m: &event::MouseEvent) -> Option<MouseAction> {
     use ai_usagebar::tui::settings::{Focus as SFocus, SettingsRow};
     use ratatui::layout::Position;
 
@@ -536,10 +562,8 @@ fn handle_mouse(
                 // through the normal key handler so save logic stays in one
                 // place and the returned action flows back to the loop.
                 s.focus = SFocus::Save;
-                Some(ai_usagebar::tui::settings::handle_key(
-                    s,
-                    KeyCode::Enter,
-                    KeyModifiers::NONE,
+                Some(MouseAction::Settings(
+                    ai_usagebar::tui::settings::handle_key(s, KeyCode::Enter, KeyModifiers::NONE),
                 ))
             }
             SettingsRow::Focus(SFocus::Active(index)) => {
@@ -554,14 +578,23 @@ fn handle_mouse(
         }
     } else {
         let hit = app.hit.borrow();
-        let (target, _) = hit
+        let nav_target = hit
             .nav_entries
             .iter()
-            .find(|(_, rect)| rect.contains(pos))?;
-        let target = *target;
+            .find(|(_, rect)| rect.contains(pos))
+            .map(|(target, _)| *target);
+        let footer_action = hit
+            .footer_actions
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))
+            .map(|(action, _)| *action);
         drop(hit);
-        app.nav_from_target(target);
-        None
+        if let Some(target) = nav_target {
+            app.nav_from_target(target);
+            None
+        } else {
+            footer_action.map(MouseAction::Footer)
+        }
     }
 }
 
@@ -680,5 +713,37 @@ mod tests {
             state.active_vendors,
             vec![VendorId::Anthropic, VendorId::Openai]
         );
+    }
+
+    #[test]
+    fn clicking_footer_actions_returns_their_matching_action() {
+        use ai_usagebar::tui::app::FooterAction;
+        use ratatui::layout::Rect;
+
+        let mut app = app_with_two();
+        app.hit.borrow_mut().footer_actions = vec![
+            (FooterAction::Refresh, Rect::new(0, 0, 8, 1)),
+            (FooterAction::RefreshAll, Rect::new(8, 0, 12, 1)),
+            (FooterAction::Settings, Rect::new(20, 0, 10, 1)),
+            (FooterAction::Quit, Rect::new(30, 0, 10, 1)),
+        ];
+
+        for (column, expected) in [
+            (0, FooterAction::Refresh),
+            (8, FooterAction::RefreshAll),
+            (20, FooterAction::Settings),
+            (30, FooterAction::Quit),
+        ] {
+            let click = event::MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            };
+            assert!(matches!(
+                handle_mouse(&mut app, &click),
+                Some(MouseAction::Footer(action)) if action == expected
+            ));
+        }
     }
 }

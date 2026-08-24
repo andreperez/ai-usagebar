@@ -544,9 +544,10 @@ make clippy                                        # cargo clippy -D warnings
 
 - `↑` / `↓` — move through the vendor menu (wraps; `Tab`/`l`/`→` and
   `Shift+Tab`/`h`/`←` still work as secondary shortcuts)
-- Mouse — click a vendor menu entry to select it; in Settings, click a
-  Dashboard provider checkbox to toggle it, a field to focus it, or **Save**
-  to save
+- Mouse — click a vendor menu entry to select it; click the footer's
+  `r`/`R`/`s`/`q`/`Esc` actions to refresh, refresh all, open Settings, or
+  quit; in Settings, click a Dashboard provider checkbox to toggle it, a field
+  to focus it, or **Save** to save
 - `r` — refresh active tab
 - `R` — refresh all tabs
 - `s` — open Settings overlay (primary vendor + Dashboard providers + API keys)

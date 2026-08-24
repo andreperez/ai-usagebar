@@ -190,6 +190,8 @@ fn desktop_profile_labels(_config: &Config) -> Vec<String> {
 pub struct HitTargets {
     /// Vendor navigation entries: Overview first, then each tab by index.
     pub nav_entries: Vec<(NavTarget, Rect)>,
+    /// Footer actions with a mouse-accessible keyboard equivalent.
+    pub footer_actions: Vec<(FooterAction, Rect)>,
     /// Settings overlay interactive rows: key fields and the save row, plus
     /// the collapsed "More providers" header.
     pub settings_rows: Vec<(SettingsRow, Rect)>,
@@ -200,6 +202,15 @@ pub struct HitTargets {
 pub enum NavTarget {
     Overview,
     Tab(usize),
+}
+
+/// What a click in the footer invokes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FooterAction {
+    Refresh,
+    RefreshAll,
+    Settings,
+    Quit,
 }
 
 #[derive(Debug)]
@@ -964,6 +975,7 @@ mod tests {
     fn hit_targets_default_to_empty() {
         let app = App::with_theme(Vec::new(), Theme::default());
         assert!(app.hit.borrow().nav_entries.is_empty());
+        assert!(app.hit.borrow().footer_actions.is_empty());
         assert!(app.hit.borrow().settings_rows.is_empty());
     }
 
