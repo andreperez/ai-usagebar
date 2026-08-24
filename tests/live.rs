@@ -59,6 +59,7 @@ use ai_usagebar::anthropic;
 use ai_usagebar::cache::Cache;
 use ai_usagebar::cursor;
 use ai_usagebar::error::AppError;
+use ai_usagebar::firecrawl;
 use ai_usagebar::kimi;
 use ai_usagebar::kiro;
 use ai_usagebar::minimax;
@@ -392,6 +393,48 @@ async fn tavily_live() {
         out.snapshot.payg_limit,
         out.snapshot.key_used,
         out.snapshot.key_limit,
+    );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn firecrawl_live() {
+    let Ok(api_key) = std::env::var("FIRECRAWL_API_KEY") else {
+        eprintln!(
+            "firecrawl_live: FIRECRAWL_API_KEY is unset — skipping optional Firecrawl smoke test"
+        );
+        return;
+    };
+    if api_key.trim().is_empty() {
+        eprintln!(
+            "firecrawl_live: FIRECRAWL_API_KEY is empty — skipping optional Firecrawl smoke test"
+        );
+        return;
+    }
+    let cache = xdg_cache_for("firecrawl");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoints = firecrawl::fetch::Endpoints::default();
+    let out = firecrawl::fetch_snapshot(
+        &client,
+        &api_key,
+        &cache,
+        &endpoints,
+        Duration::from_secs(0),
+    )
+    .await
+    .expect("firecrawl fetch should succeed against the real API");
+    if let Some(pct) = out.snapshot.period_pct() {
+        assert!(pct >= 0, "firecrawl period pct must be non-negative");
+    }
+    println!(
+        "firecrawl — remaining={}, plan={}, period_used={:?}, reset={:?}",
+        out.snapshot.remaining_credits,
+        out.snapshot.plan_credits,
+        out.snapshot.period_consumed,
+        out.snapshot.billing_period_end,
     );
 }
 

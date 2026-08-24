@@ -357,6 +357,7 @@ pub enum VendorSnapshot {
     NousResearch(crate::nous::types::AccountSnapshot),
     OpenCodeGo(crate::opencode_go::types::Usage),
     Tavily(TavilySnapshot),
+    Firecrawl(FirecrawlSnapshot),
 }
 
 /// Tavily — credit usage from the documented `GET /usage` endpoint. Tavily
@@ -406,6 +407,39 @@ impl TavilySnapshot {
             let pct = ((self.plan_used as u128 * 100) + (limit as u128 / 2)) / limit as u128;
             pct.min(100) as i32
         })
+    }
+}
+
+/// Firecrawl — team credits from `/v2/team/credit-usage` plus the matching
+/// billing period from `/v2/team/credit-usage/historical?byApiKey=false`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirecrawlSnapshot {
+    /// Credits remaining, including packs/coupons/auto-recharge credits.
+    pub remaining_credits: u64,
+    /// Credits included in the subscription plan, excluding extra credits.
+    pub plan_credits: u64,
+    /// Current billing period start; the API may return null.
+    pub billing_period_start: Option<chrono::DateTime<chrono::Utc>>,
+    /// Current billing period end; the API may return null.
+    pub billing_period_end: Option<chrono::DateTime<chrono::Utc>>,
+    /// Historical credits used for the current period, when an exact start
+    /// date match exists. Unmatched history remains absent, never guessed.
+    pub period_consumed: Option<u64>,
+    /// Non-secret binding to the API key and endpoint scope.
+    pub scope_fingerprint: String,
+}
+
+impl FirecrawlSnapshot {
+    /// Current-period usage percentage. It intentionally preserves values above
+    /// 100 so labels can expose overage; gauges clamp at render time.
+    pub fn period_pct(&self) -> Option<i32> {
+        let used = self.period_consumed?;
+        let limit = self.plan_credits;
+        if limit == 0 {
+            return None;
+        }
+        let pct = ((used as u128 * 100) + (limit as u128 / 2)) / limit as u128;
+        Some(pct.min(i32::MAX as u128) as i32)
     }
 }
 

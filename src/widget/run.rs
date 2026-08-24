@@ -16,6 +16,7 @@ use crate::config::Config;
 use crate::cursor;
 use crate::deepseek;
 use crate::error::{AppError, Result};
+use crate::firecrawl;
 use crate::grok;
 use crate::kilo;
 use crate::kimi;
@@ -162,6 +163,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         Vendor::NousResearch => nous_output(cli).await,
         Vendor::OpenCodeGo => opencode_go_output(cli, &config).await,
         Vendor::Tavily => tavily_output(cli, &config).await,
+        Vendor::Firecrawl => firecrawl_output(cli, &config).await,
     }
 }
 
@@ -785,6 +787,36 @@ async fn tavily_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
     Ok(tavily::vendor::render(
         &vendor_outcome,
         &snap,
+        &theme,
+        &opts,
+        chrono::Utc::now(),
+    ))
+}
+
+async fn firecrawl_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
+    let api_key = crate::config::resolve_api_key(
+        "Firecrawl",
+        &config.firecrawl.api_key_env,
+        config.firecrawl.api_key.as_deref(),
+    )?;
+    let client = http_client()?;
+    let cache = vendor_cache(cli, "firecrawl")?;
+    let endpoints = firecrawl::fetch::Endpoints::default();
+    let outcome =
+        match firecrawl::fetch_snapshot(&client, &api_key, &cache, &endpoints, DEFAULT_TTL).await {
+            Ok(outcome) => outcome,
+            Err(error) if error.is_transient() => {
+                return Ok(WaybarOutput::loading(cli.icon.as_deref()));
+            }
+            Err(error) => return Err(error),
+        };
+    let theme = theme_from_cli(cli);
+    let snapshot = outcome.snapshot.clone();
+    let vendor_outcome: VendorOutcome = outcome.into();
+    let opts = RenderOpts::from_cli(cli);
+    Ok(firecrawl::vendor::render(
+        &vendor_outcome,
+        &snapshot,
         &theme,
         &opts,
         chrono::Utc::now(),

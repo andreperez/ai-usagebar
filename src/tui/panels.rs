@@ -215,6 +215,13 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
                 .unwrap_or_else(|| ("—".into(), PaceSeverity::Low));
             (s.plan.clone(), vec![cell])
         }
+        VendorSnapshot::Firecrawl(s) => {
+            let cell = s
+                .period_pct()
+                .map(|value| pct("plan", value))
+                .unwrap_or_else(|| ("—".into(), PaceSeverity::Low));
+            ("Firecrawl".into(), vec![cell])
+        }
     };
 
     for (text, _) in &mut cells {
@@ -278,6 +285,7 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         .max(),
         VendorSnapshot::SuperGrok(s) => Some(s.weekly_pct),
         VendorSnapshot::Tavily(s) => s.plan_pct(),
+        VendorSnapshot::Firecrawl(s) => s.period_pct(),
         VendorSnapshot::Openrouter(_)
         | VendorSnapshot::Deepseek(_)
         | VendorSnapshot::Kilo(_)
@@ -345,6 +353,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::NousResearch(s) => nous_sections(s, now),
                 VendorSnapshot::OpenCodeGo(s) => opencode_go_sections(s, now),
                 VendorSnapshot::Tavily(s) => tavily_sections(s),
+                VendorSnapshot::Firecrawl(s) => firecrawl_sections(s, now),
             };
             // Inject the (already-absolute) fetched-at instant into the title
             // row, right-aligned. Pre-snapshotted in app::refresh_one so it
@@ -441,6 +450,14 @@ fn warning_label(
             ) =>
         {
             "Tavily API schema drift"
+        }
+        VendorSnapshot::Firecrawl(_)
+            if matches!(
+                crate::firecrawl::vendor::warning_kind(*code, message),
+                crate::firecrawl::vendor::WarningKind::SchemaDrift
+            ) =>
+        {
+            "Firecrawl API schema drift"
         }
         _ => "Warning",
     };
@@ -1158,6 +1175,51 @@ fn tavily_sections(s: &crate::usage::TavilySnapshot) -> SectionBuilder {
     v
 }
 
+fn firecrawl_sections(s: &crate::usage::FirecrawlSnapshot, now: DateTime<Utc>) -> SectionBuilder {
+    let mut v = SectionBuilder::new(vec![Section::Title {
+        left: "Firecrawl".into(),
+        right: None,
+    }]);
+    match s.period_pct() {
+        Some(pct) => {
+            v.push(Section::Spacer);
+            v.push_metric(
+                Section::Metric {
+                    label: "Plan credits".into(),
+                    pct: pct.clamp(0, 100) as u16,
+                    severity: severity_for(pct),
+                    value_label: format!("{pct}%"),
+                    footnote: format!(
+                        "{} / {} used · {} remaining",
+                        s.period_consumed.unwrap_or_default(),
+                        s.plan_credits,
+                        s.remaining_credits
+                    ),
+                },
+                s.billing_period_end,
+            );
+        }
+        None => {
+            v.push(Section::Spacer);
+            v.push(Section::Text {
+                label: "Remaining credits".into(),
+                value: s.remaining_credits.to_string(),
+            });
+            v.push(Section::Text {
+                label: "Plan credits".into(),
+                value: s.plan_credits.to_string(),
+            });
+        }
+    }
+    if let Some(end) = s.billing_period_end {
+        v.push(Section::Text {
+            label: "Billing reset".into(),
+            value: countdown::format(Some(end), now),
+        });
+    }
+    v
+}
+
 fn push_window(
     sections: &mut SectionBuilder,
     label: &str,
@@ -1799,6 +1861,28 @@ mod tests {
         assert!(sections.iter().any(|s| matches!(
             s,
             Section::Text { label, value } if label == "Plan used" && value == "620 / unlimited"
+        )));
+    }
+
+    #[test]
+    fn firecrawl_matching_period_renders_a_progress_metric() {
+        let snapshot = crate::usage::FirecrawlSnapshot {
+            remaining_credits: 1617,
+            plan_credits: 1000,
+            billing_period_start: Some("2026-08-14T02:41:45Z".parse().unwrap()),
+            billing_period_end: Some("2026-09-14T02:41:45Z".parse().unwrap()),
+            period_consumed: Some(91),
+            scope_fingerprint: String::new(),
+        };
+        let sections = sections_for(&ready(VendorSnapshot::Firecrawl(snapshot)), now(), 5);
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Metric { label, pct, value_label, footnote, .. }
+                if label == "Plan credits"
+                    && *pct == 9
+                    && value_label == "9%"
+                    && footnote.contains("91 / 1000")
+                    && footnote.contains("1617 remaining")
         )));
     }
 

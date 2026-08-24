@@ -126,6 +126,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         section: "tavily",
         note: "usage & quota",
     },
+    KeyVendor {
+        id: VendorId::Firecrawl,
+        label: "Firecrawl",
+        env: "FIRECRAWL_API_KEY",
+        section: "firecrawl",
+        note: "credits & billing period",
+    },
 ];
 
 /// Read the inline `api_key` currently in config for a given section, so the
@@ -144,6 +151,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "minimax" => cfg.minimax.api_key.as_deref(),
         "opencode-go" => cfg.opencode_go.api_key.as_deref(),
         "tavily" => cfg.tavily.api_key.as_deref(),
+        "firecrawl" => cfg.firecrawl.api_key.as_deref(),
         _ => None,
     }
 }

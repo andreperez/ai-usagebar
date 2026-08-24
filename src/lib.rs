@@ -22,6 +22,7 @@ pub mod cursor;
 pub mod deepseek;
 pub mod display;
 pub mod error;
+pub mod firecrawl;
 pub mod format;
 pub mod grok;
 pub mod kilo;

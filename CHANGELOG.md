@@ -25,6 +25,10 @@ Each release is also published at
   Settings overlay, unconfigured key vendors are grouped under a collapsed
   "More providers" section (navigate past the last configured row or click the
   header to expand).
+- Firecrawl team credit usage from the documented v2 billing endpoints:
+  remaining credits, plan credits, matching historical billing-period usage,
+  and reset metadata. Historical usage is optional and never suppresses live
+  current-credit data when unavailable.
 
 ## [1.4.0] — 2026-08-21
 

@@ -58,6 +58,7 @@ pub struct Config {
     #[serde(rename = "opencode-go")]
     pub opencode_go: OpenCodeGoConfig,
     pub tavily: TavilyConfig,
+    pub firecrawl: FirecrawlConfig,
 }
 
 /// UI / dispatch preferences. Currently just `primary` — which vendor the
@@ -522,6 +523,28 @@ impl Default for TavilyConfig {
             api_key_env: "TAVILY_API_KEY".to_string(),
             api_key: None,
             project_id: None,
+        }
+    }
+}
+
+/// Firecrawl — team credit usage from the documented v2 billing endpoints.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FirecrawlConfig {
+    pub enabled: bool,
+    /// Env var name to read the key from (env wins over `api_key`).
+    pub api_key_env: String,
+    /// Inline key fallback. Config files containing this field are protected
+    /// with mode 0600 on Unix.
+    pub api_key: Option<String>,
+}
+
+impl Default for FirecrawlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "FIRECRAWL_API_KEY".to_string(),
+            api_key: None,
         }
     }
 }
@@ -1013,6 +1036,7 @@ impl Config {
             self.anthropic_api.api_key.as_deref(),
             self.opencode_go.api_key.as_deref(),
             self.tavily.api_key.as_deref(),
+            self.firecrawl.api_key.as_deref(),
         ]
         .into_iter()
         .chain(
@@ -1068,6 +1092,7 @@ impl Config {
             VendorId::NousResearch => self.nous.enabled,
             VendorId::OpenCodeGo => self.opencode_go.enabled,
             VendorId::Tavily => self.tavily.enabled,
+            VendorId::Firecrawl => self.firecrawl.enabled,
         }
     }
 
@@ -1127,6 +1152,10 @@ impl Config {
             VendorId::Tavily => {
                 env_or_inline(&self.tavily.api_key_env, self.tavily.api_key.as_deref())
             }
+            VendorId::Firecrawl => env_or_inline(
+                &self.firecrawl.api_key_env,
+                self.firecrawl.api_key.as_deref(),
+            ),
             // OAuth / local-state vendors (Claude, Codex, Nous, Cursor, Kiro,
             // Antigravity, SuperGrok) resolve their credential at fetch time.
             _ => true,
@@ -1354,6 +1383,7 @@ mod tests {
             VendorId::Minimax,
             VendorId::Kiro,
             VendorId::Tavily,
+            VendorId::Firecrawl,
         ] {
             assert!(!c.is_enabled(opt_in), "{opt_in:?}");
         }
@@ -1371,6 +1401,9 @@ mod tests {
         assert_eq!(config.tavily.api_key_env, "TAVILY_API_KEY");
         assert!(config.tavily.api_key.is_none());
         assert!(config.tavily.project_id.is_none());
+        assert!(!config.is_enabled(VendorId::Firecrawl));
+        assert_eq!(config.firecrawl.api_key_env, "FIRECRAWL_API_KEY");
+        assert!(config.firecrawl.api_key.is_none());
     }
 
     #[test]

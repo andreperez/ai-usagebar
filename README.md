@@ -145,6 +145,7 @@ come from environment variables or `config.toml`.
 | Nous Research | OAuth device flow | Enable `[nous]`, click **Log in with Nous Research** in the Omarchy settings panel, or run `ai-usagebar auth nous login`. Credentials are kept in ai-usagebar's separate platform config directory (`~/.config/ai-usagebar/credentials.json` on Linux). |
 | OpenCode Go | API key (`OPENCODE_GO_API_KEY` env or `[opencode-go] api_key` in config) | Enable `[opencode-go]`, then enter the key in the Omarchy settings panel or set the environment variable. |
 | Tavily | API key (`TAVILY_API_KEY` env or `[tavily] api_key` in config) | Set either and opt in. Reports the plan's billing-cycle usage (used/limit and a % when the plan has a limit), pay-as-you-go, this key's usage, and the per-endpoint breakdown. Optionally set `[tavily] project_id` to scope the query and cache to one project. |
+| Firecrawl | API key (`FIRECRAWL_API_KEY` env or `[firecrawl] api_key` in config) | Set either and opt in. Reports remaining credits, plan credits, matching billing-period usage, and the billing-period reset. Historical detail is optional. |
 
 ### Nous credits and OpenCode Go
 
@@ -345,7 +346,7 @@ privileges, and does not overwrite user configuration.
 
 | Integration | Supported providers | Notes |
 |---|---|---|
-| [macOS menu bar](macos/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok (xAI), Anthropic API, Cursor, Google Antigravity, Tavily | Fourteen providers. |
+| [macOS menu bar](macos/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok (xAI), Anthropic API, Cursor, Google Antigravity, Tavily, Firecrawl | Fifteen providers. |
 | [GNOME Shell](gnome-extension/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Google Antigravity | Antigravity's two quota pools appear as grouped rows. |
 | [KDE Plasma 6](kde-plasmoid/README.md) | Whatever `usage --json` reports | Provider tabs in the popup; vendor is per applet instance. |
 

@@ -37,6 +37,7 @@ pub(crate) const VENDOR_SECRET_ENV_VARS: &[&str] = &[
     "GROK_API_KEY",
     "OPENCODE_GO_API_KEY",
     "TAVILY_API_KEY",
+    "FIRECRAWL_API_KEY",
 ];
 
 pub(crate) fn vendor_secret_env_vars_to_remove(keep: &[&str]) -> Vec<&'static str> {
@@ -130,6 +131,7 @@ pub enum VendorId {
     #[serde(rename = "opencode-go")]
     OpenCodeGo,
     Tavily,
+    Firecrawl,
 }
 
 impl VendorId {
@@ -154,6 +156,7 @@ impl VendorId {
             VendorId::NousResearch => "nous",
             VendorId::OpenCodeGo => "opencode-go",
             VendorId::Tavily => "tavily",
+            VendorId::Firecrawl => "firecrawl",
         }
     }
 
@@ -181,6 +184,7 @@ impl VendorId {
             VendorId::NousResearch => "Nous Research",
             VendorId::OpenCodeGo => "OpenCode Go",
             VendorId::Tavily => "Tavily",
+            VendorId::Firecrawl => "Firecrawl",
         }
     }
 
@@ -205,6 +209,7 @@ impl VendorId {
             VendorId::NousResearch,
             VendorId::OpenCodeGo,
             VendorId::Tavily,
+            VendorId::Firecrawl,
         ]
     }
 }
@@ -275,6 +280,12 @@ mod tests {
             serde_json::to_value(VendorId::Tavily).unwrap(),
             serde_json::json!("tavily")
         );
+        assert_eq!(VendorId::Firecrawl.slug(), "firecrawl");
+        assert_eq!(VendorId::Firecrawl.display_name(), "Firecrawl");
+        assert_eq!(
+            serde_json::to_value(VendorId::Firecrawl).unwrap(),
+            serde_json::json!("firecrawl")
+        );
     }
 
     #[test]
@@ -291,6 +302,7 @@ mod tests {
             "XAI_MANAGEMENT_KEY",
             "ANTHROPIC_ADMIN_KEY",
             "TAVILY_API_KEY",
+            "FIRECRAWL_API_KEY",
         ];
         for name in configured_defaults {
             assert!(VENDOR_SECRET_ENV_VARS.contains(&name), "missing {name}");

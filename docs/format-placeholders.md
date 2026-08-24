@@ -17,7 +17,7 @@ metrics expand to an empty string unless noted otherwise.
 | SuperGrok | `sgk` | Anthropic API | `aac` |
 | Antigravity | `agy` | Cursor | `cur` |
 | MiniMax | `mmx` | Kiro CLI | `kir` |
-| Tavily | `tav` | | |
+| Tavily | `tav` | Firecrawl | `fcw` |
 
 Use `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and `{weekly_reset}`
 when one format must work across providers. Providers without matching time
@@ -227,3 +227,17 @@ credit counts.
 - `{plan}` and `{session_pct}`/`{weekly_pct}` alias the plan name and plan
   percentage. An optional `[tavily] project_id` scopes the query and cache;
   it does not change any placeholder.
+
+## Firecrawl
+
+`{fcw_headline}`, `{fcw_remaining}`, `{fcw_plan}`, `{fcw_used}`, `{fcw_pct}`,
+and `{fcw_reset}` report the documented team credit endpoints.
+
+- `{fcw_headline}` is the bar's default: the current-period percentage when
+  matching historical usage exists, otherwise the truthful remaining-credit
+  count.
+- `{fcw_pct}` preserves values above 100 in text; the visual gauge clamps only
+  its fill. `{fcw_used}` is `—` when no historical row matches the current
+  billing period.
+- `{session_pct}` and `{weekly_pct}` alias the current-period percentage when
+  available; reset aliases use the billing-period countdown.

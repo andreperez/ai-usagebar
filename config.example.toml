@@ -306,3 +306,11 @@ api_key_env = "TAVILY_API_KEY"
 # Optional project id: sent as the X-Project-ID header and folded into the
 # cache-scope fingerprint, so one project's usage is never served for another.
 # project_id = "..."
+
+# Firecrawl — team credits from the documented v2 billing endpoints. The
+# historical endpoint is queried with byApiKey=false and matched to the current
+# billing period; unmatched history is left absent rather than guessed.
+[firecrawl]
+enabled = false
+api_key_env = "FIRECRAWL_API_KEY"
+# api_key = "fc-..."              # fallback; chmod 600 the file if you use it

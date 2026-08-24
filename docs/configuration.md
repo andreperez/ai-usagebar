@@ -128,6 +128,11 @@ api_key_env = "TAVILY_API_KEY"
 # Optional project id: sent as the X-Project-ID header and folded into the
 # cache-scope fingerprint so one project's usage is never served for another.
 # project_id = "..."
+
+[firecrawl]
+enabled = true             # disabled by default; enable once you add an API key
+api_key_env = "FIRECRAWL_API_KEY"
+# api_key = "fc-..."       # used if FIRECRAWL_API_KEY is unset; chmod 600 the file!
 ```
 
 For more than one OpenRouter key, see the

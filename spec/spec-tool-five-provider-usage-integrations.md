@@ -2,7 +2,7 @@
 title: Five Provider Usage Integrations — Tavily, Firecrawl, Requesty, ZenMux, Vercel AI Gateway
 version: 1.0
 date_created: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 owner: ai-usagebar maintainers
 tags: [tool, vendor, integration, cache, api, tui, widget]
 ---
@@ -103,7 +103,7 @@ Define the implementation contract for adding five official usage providers as f
 
 - **REQ-036**: WHEN the Vercel credits fetch succeeds WHERE reporting is enabled and the report cache is expired, the system shall query `/v1/report` with UTC month-to-date bounds grouped by day; IF that report fetch fails with `403` or unsupported-plan indication, THEN the system shall still cache and display the credits payload with a sanitized warning and a six-hour report retry horizon.
 - **REQ-037**: WHEN ZenMux is queried WHERE both PAYG and subscription endpoints are reachable, the system shall require at least one valid block (`PAYG.is_some() || subscription.is_some()`); IF both fail, THEN the system shall surface a schema/HTTP error with no stale promotion beyond `MAX_STALE`.
-- **REQ-038**: WHEN Firecrawl is queried WHERE the historical endpoint returns multiple period rows, the system shall select only the row whose `period_start` equals the current billing period `start`; IF none matches, THEN the system shall leave period-consumed absent and shall not synthesize it from other periods.
+- **REQ-038**: WHEN Firecrawl is queried WHERE the historical endpoint returns multiple period rows, the system shall select only the unique row whose interval contains the current `billingPeriodStart` (an exact start-date match is preferred); IF none or multiple rows match, THEN the system shall leave period-consumed absent and shall not synthesize it from another period.
 
 ## 3.7 Non-Functional Requirements
 
@@ -432,13 +432,16 @@ Validation rules:
 
 ## 6.2 HTTP Contracts
 
-Response field names in this table and in §11 are illustrative pending the per-slice verification against official docs (CON-003, GUD-001); the authoritative shape at implementation time is whatever the linked official reference documents.
+Response field names for slices not yet implemented remain illustrative pending
+per-slice verification against official docs (CON-003, GUD-001). Firecrawl's
+field names below and in §11.2 were verified against the published v2 OpenAPI
+schema; the linked official reference remains authoritative if it changes.
 
 | Provider | Method & URL | Auth | Success | Error handling |
 |----------|--------------|------|---------|----------------|
 | Tavily | `GET https://api.tavily.com/usage` | `Authorization: Bearer <TAVILY_API_KEY>` + optional `X-Project-ID` | 200 JSON: `plan`, `limits`, `payAsYouGo`, `apiKeyUsage`, endpoint breakdown | 401/403 redacted; missing fields → Schema; non-finite → Schema |
-| Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage` | `Authorization: Bearer <FIRECRAWL_API_KEY>` | 200 JSON: `remainingCredits`, `planCredits`, `billingPeriod:{start,end}` | same |
-| Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage/historical?byApiKey=false` | same | 200 JSON: `data:[{period_start, credits_used}]` | absent/mismatch → absent detail |
+| Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage` | `Authorization: Bearer <FIRECRAWL_API_KEY>` | 200 JSON: `success`, `data:{remainingCredits,planCredits,billingPeriodStart,billingPeriodEnd}` | current data remains primary; 401/403 redacted |
+| Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage/historical?byApiKey=false` | same | 200 JSON: `success`, `periods:[{startDate,endDate,apiKey,totalCredits}]` | failure → partial current snapshot; unmatched period → absent detail |
 | Requesty | `GET https://api-v2.requesty.ai/v1/manage/org` | `Authorization: Bearer <REQUESTY_API_KEY>` | 200 JSON: `organization:{name,balance}` | 403 insufficient scope → sanitized warning |
 | Requesty | `GET https://api-v2.requesty.ai/v1/manage/org/usage?start=...&end=...&resolution=daily&groupBy=none` | same | 200 JSON: `data:[{date,cost,requests,input_tokens,output_tokens}]` | aggregate with checked add |
 | ZenMux | `GET https://zenmux.ai/api/v1/management/payg/balance` | `Authorization: Bearer <ZENMUX_MANAGEMENT_API_KEY>` | 200 JSON: `total, topUp, bonus` USD | either block alone suffices |
@@ -447,6 +450,12 @@ Response field names in this table and in §11 are illustrative pending the per-
 | Vercel | `GET https://ai-gateway.vercel.sh/v1/report?from=...&to=...&groupBy=day` | same | 200 JSON: `data:[{day,cost,input_tokens,output_tokens,requests}]` | 403/unsupported → credits retained |
 
 Common transport: `reqwest` with `HTTP_CLIENT_TIMEOUT` 30 s outer, per-request tighter, `read_body_capped` 2 MiB, `same_origin_redirect_policy` (10 hops max, scheme/host/port must match).
+
+Firecrawl compatibility note: the published schema names the historical count
+`totalCredits`, while the live response may return `creditsUsed`; both map to
+`period_consumed`. The current in-progress period may also return
+`endDate: null`, which is valid and does not invalidate the current-credit
+snapshot.
 
 ## 6.3 Snapshot Shapes (`src/usage.rs`)
 
@@ -467,8 +476,8 @@ pub struct TavilySnapshot {
 pub struct FirecrawlSnapshot {
     pub remaining_credits: u64,
     pub plan_credits: u64,
-    pub billing_start: DateTime<Utc>,
-    pub billing_end: DateTime<Utc>,
+    pub billing_period_start: Option<DateTime<Utc>>,
+    pub billing_period_end: Option<DateTime<Utc>>,
     pub period_consumed: Option<u64>, // matched historical row
     pub scope_fingerprint: String,
 }
@@ -556,8 +565,8 @@ Ordering is `VendorId::all()` filtered by `enabled` plus real `fetched_at`/`rese
 - **AC-001**: Given a config with `tavily.enabled = true` and `TAVILY_API_KEY` set, When the widget requests Tavily, Then the system sends `Authorization: Bearer <key>` to `GET https://api.tavily.com/usage` and renders plan/payg/key usage without inventing reset timestamps.
 - **AC-002**: Given `tavily.project_id = "prj_123"`, When fetching, Then the request includes `X-Project-ID: prj_123` and the cache payload fingerprint includes the normalized project id, so changing it forces a refetch and never reuses the prior project's payload.
 - **AC-003**: Given Tavily `plan.limit` missing or zero, When rendering headline, Then the system shows a truthful text headline with no percentage and no gauge.
-- **AC-004**: Given Firecrawl with `remainingCredits` and `planCredits` plus a historical row whose `period_start` matches `billingPeriod.start`, When rendering, Then headline is `used / planCredits` percentage preserving >100 in label and clamping only the gauge, and `reset_at` equals `billingPeriod.end`.
-- **AC-005**: Given Firecrawl historical rows none matching `billingPeriod.start`, When rendering, Then `period_consumed` is absent and no arbitrary row is chosen; remaining credits still display.
+- **AC-004**: Given Firecrawl with `data.remainingCredits` and `data.planCredits` plus a unique historical row whose interval contains `data.billingPeriodStart`, When rendering, Then headline is `used / planCredits` percentage preserving >100 in label and clamping only the gauge, and `reset_at` equals `data.billingPeriodEnd`.
+- **AC-005**: Given Firecrawl historical rows with no unique interval containing `data.billingPeriodStart`, When rendering, Then `period_consumed` is absent and no arbitrary row is chosen; remaining credits still display.
 - **AC-006**: Given Firecrawl historical fetch returns 500, When primary succeeds, Then the system caches remaining+plan credits with `stale=false`, writes sanitized `.last_error` and shows primary data with warning.
 - **AC-007**: Given Requesty with 10 daily usage rows for August, When aggregating, Then totals equal checked sum of all rows and interval is `2026-08-01T00:00:00Z` to `now`; a fixed injected clock yields deterministic bounds in tests.
 - **AC-008**: Given Requesty `GET /v1/manage/org` succeeds but `/v1/manage/org/usage` returns 403, When rendering, Then balance and org name display with a sanitized warning and token/cost totals are absent rather than zero.
@@ -666,11 +675,11 @@ Validates as: `plan.limit > 0 → pct = round(62/100*100) = 62`. When `plan.limi
 
 ```json
 // GET /v2/team/credit-usage
-{ "remainingCredits": 8200, "planCredits": 10000, "billingPeriod": { "start": "2026-08-01T00:00:00Z", "end": "2026-09-01T00:00:00Z" } }
+{ "success": true, "data": { "remainingCredits": 8200, "planCredits": 10000, "billingPeriodStart": "2026-08-01T00:00:00Z", "billingPeriodEnd": "2026-09-01T00:00:00Z" } }
 // GET /v2/team/credit-usage/historical?byApiKey=false
-{ "data": [
-  { "period_start": "2026-08-01T00:00:00Z", "credits_used": 1800 },
-  { "period_start": "2026-07-01T00:00:00Z", "credits_used": 9500 }
+{ "success": true, "periods": [
+  { "startDate": "2026-08-01T00:00:00Z", "endDate": "2026-09-01T00:00:00Z", "apiKey": null, "totalCredits": 1800 },
+  { "startDate": "2026-07-01T00:00:00Z", "endDate": "2026-08-01T00:00:00Z", "apiKey": null, "totalCredits": 9500 }
 ]}
 ```
 Only the `2026-08-01` row matches; `2026-07-01` is ignored. `period_consumed = 1800`, `pct = 18`.
@@ -724,7 +733,7 @@ Aggregation uses `checked_add` for integers and `finite_amount` for `cost`; `req
 | 7 | Scope key changes mid-cache | Fingerprint mismatch → refetch; stale payload from old scope never served. |
 | 8 | Body 2.1 MiB chunked | `read_body_capped` rejects with "exceeds the 2 MiB limit" and does not cache. |
 | 9 | Cross-origin 302 to `https://evil.example` | Redirect not followed; `Authorization` / `x-api-key` not forwarded. |
-| 10 | Historical row period_start is non-RFC3339 | Row ignored as schema error; primary data retained. |
+| 10 | Historical row `startDate` is non-RFC3339 | Secondary detail becomes partial/absent; primary data remains usable. |
 | 11 | Unknown ZenMux `status = "suspended_pending_review"` | `Other("suspended_pending_review")`, severity degraded, never treated as Active. |
 | 12 | Vercel OIDC env overridden to `MY_GATEWAY_TOKEN` | Key resolved from `MY_GATEWAY_TOKEN`; fingerprint binds to env-var name + token hash. |
 

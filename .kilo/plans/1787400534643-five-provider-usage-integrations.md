@@ -113,12 +113,14 @@ Official documentation is authoritative. Before implementing each slice, recheck
 
 **Slice notes**: field names implemented from the published OpenAPI schema (`account.current_plan`, `plan_usage`, `plan_limit`, `paygo_usage`, `paygo_limit`, `key.usage/limit`, `*_usage` breakdown) — superseding the illustrative shapes in spec §6.2. Fingerprint follows the existing `sha2`/`opencode_go` convention. No new Cargo dependency. `cargo test --all-targets`, `make test`, `make desktop-test`, `cargo machete` green; `cargo clippy -D warnings` passes on Linux (Windows-only pre-existing `cfg(unix)` dead-code warnings in `src/nous/credentials.rs` are untouched).
 
-### 3. Firecrawl Vertical Slice
+### 3. Firecrawl Vertical Slice  ✅ (done 2026-08-24; verified against official v2 OpenAPI schema)
 
-- Create `src/firecrawl/{mod,types,fetch,vendor}.rs`.
-- Fetch current and historical endpoints concurrently where cache state allows (`tokio::join`); retain current credit data when historical usage fails (partial snapshot + `.last_error`).
-- Validate billing timestamps (`start < end`, not in future), match the historical row to the current billing period (exact `period_start` equality), and keep unmatched history absent rather than selecting an arbitrary row.
-- Implement cache round trips, partial-warning tests, reset metadata through `SectionBuilder::push_metric` (absolute `reset_at`), all interface mappings, documentation, and ignored live smoke coverage.
+- [x] Create `src/firecrawl/{mod,types,fetch,vendor}.rs`.
+- [x] Fetch current and historical endpoints concurrently with `tokio::join`; retain current credit data when historical usage fails (partial snapshot + `.last_error`) and retry partial payloads on a five-minute horizon.
+- [x] Validate `billingPeriodStart`/`billingPeriodEnd` (`start <= now`, `end > start`), match the unique `periods[]` interval containing the current billing-period start (exact start preferred), and keep unmatched/ambiguous history absent rather than selecting an arbitrary row.
+- [x] Implement cache round trips, SHA-256 key scope attribution, partial-warning tests, reset metadata through `SectionBuilder::push_metric` (absolute `reset_at`), widget/TUI/report/Settings/macOS mappings, documentation, and ignored live smoke coverage.
+
+**Slice notes**: official response fields are `success/data.remainingCredits/planCredits/billingPeriodStart/billingPeriodEnd` and `success/periods[].startDate/endDate/apiKey/totalCredits`; the live service may return `creditsUsed` as the historical count and `endDate = null` for the active month, both supported. The historical route is queried with `byApiKey=false`. Current credit data remains live when historical detail fails; `usage --json` retains the primary data and sanitized warning.
 
 ### 4. Requesty Vertical Slice
 

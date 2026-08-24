@@ -804,6 +804,19 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
             .await?;
             Ok(outcome.into())
         }
+        VendorId::Firecrawl => {
+            let api_key = crate::config::resolve_api_key(
+                "Firecrawl",
+                &config.firecrawl.api_key_env,
+                config.firecrawl.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("firecrawl")?;
+            let endpoints = crate::firecrawl::fetch::Endpoints::default();
+            let outcome =
+                crate::firecrawl::fetch_snapshot(client, &api_key, &cache, &endpoints, DEFAULT_TTL)
+                    .await?;
+            Ok(outcome.into())
+        }
     }
 }
 

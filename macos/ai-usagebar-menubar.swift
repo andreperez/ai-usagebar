@@ -545,6 +545,7 @@ let VENDOR_AUTH: [VendorAuth] = [
     VendorAuth(id: "grok", name: "Grok (xAI)", kind: "apikey", cli: "", login: "", pkg: "", env: "XAI_MANAGEMENT_KEY"),
     VendorAuth(id: "anthropic_api", name: "Anthropic API", kind: "apikey", cli: "", login: "", pkg: "", env: "ANTHROPIC_ADMIN_KEY"),
     VendorAuth(id: "tavily", name: "Tavily", kind: "apikey", cli: "", login: "", pkg: "", env: "TAVILY_API_KEY"),
+    VendorAuth(id: "firecrawl", name: "Firecrawl", kind: "apikey", cli: "", login: "", pkg: "", env: "FIRECRAWL_API_KEY"),
     // Cursor has no API key: the binary reads the session token the Cursor IDE
     // wrote to its own state.vscdb. `kind: "local"` marks the "configured =
     // signed in to the app" case (like Antigravity below), with no login CLI
@@ -1105,7 +1106,7 @@ func addAccountScript(binary: String, label: String, desktop: Bool) -> String {
 func defaultEnabled(_ id: String) -> Bool {
     switch id {
     case "anthropic", "openai", "zai", "openrouter": return true
-    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily": return false
+    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl": return false
     default: return true
     }
 }
