@@ -81,10 +81,10 @@ Official documentation is authoritative. Before implementing each slice, recheck
 - Snapshot contains optional PAYG and subscription blocks.
 - PAYG block: total, top-up, and bonus USD credits.
 - Subscription block: tier, status, expiry, five-hour and seven-day windows, monthly maximums, flow counts, and USD values.
-- Headline/severity: worst live five-hour/seven-day quota when subscription data exists; otherwise PAYG balance with balance-specific severity (thresholds 50/75/90).
-- Treat `usage_percentage` as a fraction (0.0–1.0) and validate before conversion to integer percent (round, clamp 0–100 for display, preserve raw for label).
+- Headline/severity: worst live five-hour/seven-day quota when subscription data exists; otherwise PAYG balance with the established balance thresholds (below $1 critical, below $5 high, below $20 mid).
+- Treat `usage_percentage` as a fraction (0.0–1.0) and validate before conversion to the integer percentage displayed by shared window renderers.
 - Preserve account statuses without treating unknown future values as healthy — unknown → `Other(status_string)` with degraded severity.
-- **REV**: `vendor_short = zmx`; snapshot `enum Status { Active, PastDue, Canceled, Other(String) }`.
+- **REV**: `vendor_short = zmx`; snapshot `enum Status { Healthy, Monitored, Abusive, Suspended, Banned, Other(String) }`.
 
 ### Vercel AI Gateway
 
@@ -139,12 +139,18 @@ blocked only by existing Windows dead-code warnings in `src/nous/credentials.rs`
 macOS Swift tests and QML lint are pending because their platform tools are not
 available here; the release TUI executable remains locked by a running process.
 
-### 5. ZenMux Vertical Slice
+### 5. ZenMux Vertical Slice  ✅
 
 - Create `src/zenmux/{mod,types,fetch,vendor}.rs`.
 - Fetch PAYG and subscription endpoints independently with the management key (`tokio::join`); require at least one valid block (`PAYG.is_some() || subscription.is_some()`), otherwise schema error.
 - Convert documented quota fractions and timestamps into native `UsageWindow`s while retaining flow/value details and account status (`Other` for unknown).
 - Test PAYG-only, subscription-only, both-success, both-fail, invalid standard key (401 with "management key required"), rate-limit `422`, unknown status, schema drift, cache attribution, all interfaces, documentation, and ignored live smoke coverage.
+
+**Slice notes**: The official management endpoints return independent
+`success/data` envelopes. PAYG uses `total_credits`, `top_up_credits`, and
+`bonus_credits`; subscription data uses `account_status` plus `quota_5_hour`,
+`quota_7_day`, and `quota_monthly`. Either valid block is cached and displayed
+while the other endpoint's sanitized diagnostic is retained for five minutes.
 
 ### 6. Vercel AI Gateway Vertical Slice
 

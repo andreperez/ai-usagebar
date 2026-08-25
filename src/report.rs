@@ -735,6 +735,69 @@ mod tests {
     }
 
     #[test]
+    fn zenmux_json_carries_quota_metrics_and_payg_text() {
+        use crate::usage::{
+            UsageWindow, ZenMuxPayg, ZenMuxQuota, ZenMuxSnapshot, ZenMuxStatus, ZenMuxSubscription,
+        };
+
+        let five_reset: chrono::DateTime<Utc> = "2026-08-24T15:00:00Z".parse().unwrap();
+        let seven_reset: chrono::DateTime<Utc> = "2026-08-29T12:00:00Z".parse().unwrap();
+        let quota = |pct, reset, duration| ZenMuxQuota {
+            window: UsageWindow {
+                utilization_pct: pct,
+                resets_at: Some(reset),
+                window_duration: duration,
+            },
+            max_flows: 1000.0,
+            used_flows: 840.0,
+            remaining_flows: 160.0,
+            used_value_usd: 8.4,
+            max_value_usd: 10.0,
+        };
+        let state = TabState::Ready(Box::new(ReadyTab {
+            snapshot: VendorSnapshot::ZenMux(ZenMuxSnapshot {
+                payg: Some(ZenMuxPayg {
+                    total_credits: 42.5,
+                    top_up_credits: 30.0,
+                    bonus_credits: 12.5,
+                }),
+                subscription: Some(ZenMuxSubscription {
+                    tier: "Pro".into(),
+                    plan_amount_usd: 20.0,
+                    expires_at: "2026-09-15T00:00:00Z".parse().unwrap(),
+                    status: ZenMuxStatus::Healthy,
+                    base_usd_per_flow: 0.01,
+                    effective_usd_per_flow: 0.01,
+                    five_hour: quota(84, five_reset, chrono::Duration::hours(5)),
+                    seven_day: quota(42, seven_reset, chrono::Duration::days(7)),
+                    monthly_max_flows: 30_000.0,
+                    monthly_max_value_usd: 300.0,
+                }),
+                scope_fingerprint: String::new(),
+            }),
+            stale: false,
+            last_error: None,
+            fetched_at: None,
+        }));
+        let projected = entry_from_state(&TabId::vendor(VendorId::ZenMux), &state, Utc::now());
+        let rendered = render_json_for_primary(&[projected], None);
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        let entry = &value["entries"][0];
+        assert_eq!(entry["id"], "zenmux");
+        assert_eq!(entry["display_name"], "ZenMux");
+        assert_eq!(entry["metrics"].as_array().unwrap().len(), 2);
+        assert_eq!(entry["metrics"][0]["label"], "5h quota");
+        assert_eq!(entry["metrics"][0]["percent"], 84);
+        assert_eq!(entry["metrics"][0]["severity"], "high");
+        assert_eq!(entry["metrics"][0]["reset_at"], "2026-08-24T15:00:00Z");
+        assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
+            section["type"] == "text"
+                && section["label"] == "PAYG balance"
+                && section["value"] == "$42.50"
+        }));
+    }
+
+    #[test]
     fn failed_entries_do_not_duplicate_tui_retry_rows() {
         let failed = entry_from_state(
             &TabId::vendor(VendorId::Openai),

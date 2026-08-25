@@ -27,6 +27,7 @@ defensive and includes opt-in live tests for catching response changes.
 | **Tavily** | `api.tavily.com/usage` (documented; optional `X-Project-ID` header) | Plan billing-cycle used/limit (%), pay-as-you-go, this key's used/limit, per-endpoint breakdown (search/extract/crawl/map/research) | Yes |
 | **Firecrawl** | `api.firecrawl.dev/v2/team/credit-usage` + `/team/credit-usage/historical?byApiKey=false` (documented) | Remaining credits, plan credits, matching billing-period usage %, billing-period reset | Yes |
 | **Requesty** | `api-v2.requesty.ai/v1/manage/org` + `/org/usage?start=<RFC3339>&end=<RFC3339>&resolution=day` (documented) | Organization balance plus optional month-to-date spend, request, and token totals | Yes |
+| **ZenMux** | `zenmux.ai/api/v1/management/payg/balance` + `/subscription/detail` (documented Management API) | PAYG balance plus optional subscription 5h/7d quotas, status, and monthly cap | Yes |
 
 
 ## Stability notes
@@ -43,6 +44,7 @@ defensive and includes opt-in live tests for catching response changes.
 | Tavily | Documented `/usage` route with published OpenAPI schema. The `plan_limit`/`key.limit` fields are `null` for unlimited plans; the payload carries no reset timestamp. |
 | Firecrawl | Documented v2 billing routes. Historical usage is optional detail: a current-credit response remains usable when historical usage fails or has no unique matching period. The live API may return `creditsUsed` and a null `endDate`; the parser accepts those forms alongside the published `totalCredits` shape. |
 | Requesty | Documented management routes. Organization balance is primary; ungrouped `usage` map aggregation is optional detail, so a 403 or transient usage failure retains the live balance with a sanitized warning. |
+| ZenMux | Documented Management API routes. PAYG and subscription responses are independent `success/data` envelopes; either valid block remains visible when the other fails. Standard inference keys are rejected, and `422` is a rate-limit diagnostic. |
 
 Codex's known five-hour and seven-day windows are matched by their reported
 duration, not by `primary_window` or `secondary_window` position. This handles
@@ -58,8 +60,9 @@ make smoke
 
 Claude, Codex, Z.AI, and OpenRouter tests require their normal credentials or
 API keys. Kimi is optional: its test prints a skip reason when `KIMI_API_KEY` is
-unset. Tavily, Firecrawl, and Requesty are likewise optional and skip without
-`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, or `REQUESTY_API_KEY`.
+unset. Tavily, Firecrawl, Requesty, and ZenMux are likewise optional and skip
+without `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `REQUESTY_API_KEY`, or
+`ZENMUX_MANAGEMENT_API_KEY`.
 
 To test only Kimi:
 

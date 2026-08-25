@@ -18,7 +18,7 @@ metrics expand to an empty string unless noted otherwise.
 | Antigravity | `agy` | Cursor | `cur` |
 | MiniMax | `mmx` | Kiro CLI | `kir` |
 | Tavily | `tav` | Firecrawl | `fcw` |
-| Requesty | `rqy` | | |
+| Requesty | `rqy` | ZenMux | `zmx` |
 
 Use `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and `{weekly_reset}`
 when one format must work across providers. Providers without matching time
@@ -259,3 +259,21 @@ and optional month-to-date management usage.
 - Requesty has no rolling quota denominator or reset timestamp, so
   `{session_pct}` and `{weekly_pct}` are neutral `0` values and reset aliases
   are `—`.
+
+## ZenMux
+
+`{zmx_headline}`, `{zmx_payg}`, `{zmx_topup}`, `{zmx_bonus}`, `{zmx_tier}`,
+`{zmx_status}`, `{zmx_five}`, `{zmx_five_reset}`, `{zmx_seven}`,
+`{zmx_seven_reset}`, and `{zmx_expiry}` report PAYG balance and subscription
+quota data from the Management API.
+
+- `{zmx_payg}`, `{zmx_topup}`, and `{zmx_bonus}` are USD PAYG balances.
+- `{zmx_five}` and `{zmx_seven}` are the five-hour and seven-day subscription
+  quota percentages. Their elapsed and pace families are `zmx_five_*` and
+  `zmx_seven_*`.
+- `{plan}`, `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and
+  `{weekly_reset}` alias subscription data only when the subscription endpoint
+  succeeds. They are empty for a PAYG-only snapshot, preventing fake quota
+  windows in desktop adapters.
+- `{zmx_status}` preserves documented account status; an unknown status is
+  shown as received and is never treated as healthy.

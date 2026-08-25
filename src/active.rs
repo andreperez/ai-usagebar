@@ -120,6 +120,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "tavily" => Some(VendorId::Tavily),
         "firecrawl" => Some(VendorId::Firecrawl),
         "requesty" => Some(VendorId::Requesty),
+        "zenmux" => Some(VendorId::ZenMux),
         _ => None,
     }
 }
@@ -187,6 +188,12 @@ mod tests {
     fn parse_slug_requesty_round_trips() {
         assert_eq!(parse_slug("requesty"), Some(VendorId::Requesty));
         assert_eq!(VendorId::Requesty.slug(), "requesty");
+    }
+
+    #[test]
+    fn parse_slug_zenmux_round_trips() {
+        assert_eq!(parse_slug("zenmux"), Some(VendorId::ZenMux));
+        assert_eq!(VendorId::ZenMux.slug(), "zenmux");
     }
 
     #[test]

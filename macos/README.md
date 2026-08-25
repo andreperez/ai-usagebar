@@ -15,15 +15,16 @@ A single Swift file (`NSStatusItem` + `NSAttributedString`); no Xcode project.
 
 ## Vendor scope
 
-The selector supports **sixteen vendors** that ship in the binary:
+The selector supports **seventeen vendors** that ship in the binary:
 
 - **Rate-limit windows (5h / weekly):** Claude, Codex,
   Z.AI (GLM), and Google Antigravity (two independent pools — Gemini, and
   Claude & GPT OSS — each with its own 5h/weekly pair).
 - **Included-usage pools:** Cursor (Cursor Models and Other Models, both reset
   on the billing cycle).
-- **Usage quotas:** Tavily (plan billing-cycle usage) and Firecrawl (current
-  billing-period usage).
+- **Usage quotas:** Tavily (plan billing-cycle usage), Firecrawl (current
+  billing-period usage), and ZenMux (subscription 5h/7d quotas plus PAYG
+  balance when available).
 - **Balance-only:** OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok
   (xAI), Anthropic API, and Requesty. These have no 5h/weekly quota windows,
   so the app shows their balance/credits in the header (`cr <amount>`) and
@@ -32,7 +33,7 @@ The selector supports **sixteen vendors** that ship in the binary:
 
 Only **enabled** vendors appear in the selector. The opt-in vendors (DeepSeek,
 Kimi, Kilo, Novita, Moonshot, Grok, Anthropic API, Cursor, Antigravity, Tavily,
-Firecrawl, and Requesty) default to disabled in the Rust config, matching
+Firecrawl, Requesty, and ZenMux) default to disabled in the Rust config, matching
 `src/config.rs`; set
 `[vendor].enabled = true` (or save an API key via the TUI) to turn one on.
 

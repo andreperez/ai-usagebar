@@ -16,7 +16,7 @@
 # Valid: anthropic | anthropic_api | openai | zai | openrouter | deepseek
 #        | kimi | kilo | novita | moonshot | grok | supergrok | antigravity
 #        | cursor | minimax | kiro | nous | opencode-go | tavily | firecrawl
-#        | requesty
+#        | requesty | zenmux
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
@@ -328,4 +328,11 @@ api_key_env = "FIRECRAWL_API_KEY"
 [requesty]
 enabled = false
 api_key_env = "REQUESTY_API_KEY"  # checked first; if set + non-empty, used
+# api_key = "..."                 # fallback; chmod 600 the file if you use it
+
+# ZenMux — PAYG credits and subscription quota windows. Requires a Management
+# API Key from the ZenMux Console; standard inference keys are rejected.
+[zenmux]
+enabled = false
+api_key_env = "ZENMUX_MANAGEMENT_API_KEY"
 # api_key = "..."                 # fallback; chmod 600 the file if you use it

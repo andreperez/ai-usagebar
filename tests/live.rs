@@ -52,6 +52,8 @@
 //! - **SuperGrok**: asks the official Grok Build CLI's `x.ai/billing` ACP
 //!   extension, then asserts usage percent and plan. Set
 //!   `SUPERGROK_GROK_BINARY` to the trusted official executable.
+//! - **ZenMux**: uses `ZENMUX_MANAGEMENT_API_KEY` against the documented PAYG
+//!   and subscription management endpoints. Either valid block is sufficient.
 
 use std::time::Duration;
 
@@ -69,6 +71,7 @@ use ai_usagebar::requesty;
 use ai_usagebar::supergrok;
 use ai_usagebar::tavily;
 use ai_usagebar::zai;
+use ai_usagebar::zenmux;
 
 fn xdg_cache_for(test: &str) -> Cache {
     // Use a per-test scratch dir so smoke tests don't clobber the real cache.
@@ -485,6 +488,45 @@ async fn requesty_live() {
         "requesty — balance={}, usage_available={}",
         out.snapshot.balance,
         out.snapshot.usage.is_some()
+    );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn zenmux_live() {
+    let Ok(api_key) = std::env::var("ZENMUX_MANAGEMENT_API_KEY") else {
+        eprintln!(
+            "zenmux_live: ZENMUX_MANAGEMENT_API_KEY is unset — skipping optional ZenMux smoke test"
+        );
+        return;
+    };
+    if api_key.trim().is_empty() {
+        eprintln!(
+            "zenmux_live: ZENMUX_MANAGEMENT_API_KEY is empty — skipping optional ZenMux smoke test"
+        );
+        return;
+    }
+    let cache = xdg_cache_for("zenmux");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoints = zenmux::fetch::Endpoints::default();
+    let out = zenmux::fetch_snapshot(&client, &api_key, &cache, &endpoints, Duration::ZERO)
+        .await
+        .expect("zenmux fetch should succeed against the real API");
+    assert!(out.snapshot.payg.is_some() || out.snapshot.subscription.is_some());
+    if let Some(payg) = &out.snapshot.payg {
+        assert!(payg.total_credits.is_finite() && payg.total_credits >= 0.0);
+    }
+    if let Some(subscription) = &out.snapshot.subscription {
+        assert!((0..=100).contains(&subscription.five_hour.window.utilization_pct));
+        assert!((0..=100).contains(&subscription.seven_day.window.utilization_pct));
+    }
+    println!(
+        "zenmux — payg_available={}, subscription_available={}",
+        out.snapshot.payg.is_some(),
+        out.snapshot.subscription.is_some()
     );
 }
 

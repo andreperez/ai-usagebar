@@ -60,6 +60,7 @@ pub struct Config {
     pub tavily: TavilyConfig,
     pub firecrawl: FirecrawlConfig,
     pub requesty: RequestyConfig,
+    pub zenmux: ZenMuxConfig,
 }
 
 /// UI / dispatch preferences: active providers control automatic refresh and
@@ -579,6 +580,28 @@ impl Default for RequestyConfig {
     }
 }
 
+/// ZenMux PAYG and subscription quotas from the management API.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ZenMuxConfig {
+    pub enabled: bool,
+    /// Env var name to read the management key from (env wins over `api_key`).
+    pub api_key_env: String,
+    /// Inline management-key fallback. Config files containing this field are
+    /// protected with mode 0600 on Unix.
+    pub api_key: Option<String>,
+}
+
+impl Default for ZenMuxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "ZENMUX_MANAGEMENT_API_KEY".to_string(),
+            api_key: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ZaiConfig {
@@ -1068,6 +1091,7 @@ impl Config {
             self.tavily.api_key.as_deref(),
             self.firecrawl.api_key.as_deref(),
             self.requesty.api_key.as_deref(),
+            self.zenmux.api_key.as_deref(),
         ]
         .into_iter()
         .chain(
@@ -1125,6 +1149,7 @@ impl Config {
             VendorId::Tavily => self.tavily.enabled,
             VendorId::Firecrawl => self.firecrawl.enabled,
             VendorId::Requesty => self.requesty.enabled,
+            VendorId::ZenMux => self.zenmux.enabled,
         }
     }
 
@@ -1190,6 +1215,9 @@ impl Config {
             ),
             VendorId::Requesty => {
                 env_or_inline(&self.requesty.api_key_env, self.requesty.api_key.as_deref())
+            }
+            VendorId::ZenMux => {
+                env_or_inline(&self.zenmux.api_key_env, self.zenmux.api_key.as_deref())
             }
             // OAuth / local-state vendors (Claude, Codex, Nous, Cursor, Kiro,
             // Antigravity, SuperGrok) resolve their credential at fetch time.
@@ -1451,6 +1479,7 @@ mod tests {
             VendorId::Tavily,
             VendorId::Firecrawl,
             VendorId::Requesty,
+            VendorId::ZenMux,
         ] {
             assert!(!c.is_enabled(opt_in), "{opt_in:?}");
         }
@@ -1516,6 +1545,9 @@ mod tests {
         assert!(!config.is_enabled(VendorId::Requesty));
         assert_eq!(config.requesty.api_key_env, "REQUESTY_API_KEY");
         assert!(config.requesty.api_key.is_none());
+        assert!(!config.is_enabled(VendorId::ZenMux));
+        assert_eq!(config.zenmux.api_key_env, "ZENMUX_MANAGEMENT_API_KEY");
+        assert!(config.zenmux.api_key.is_none());
     }
 
     #[test]
@@ -1576,6 +1608,27 @@ mod tests {
     }
 
     #[test]
+    fn zenmux_is_configured_follows_inline_keys_and_env() {
+        let mut config = Config::default();
+        config.zenmux.api_key_env = "ZENMUX_TEST_UNSET_ENV".into();
+        assert!(!config.is_configured(VendorId::ZenMux));
+        config.zenmux.api_key = Some("zmx-test".into());
+        assert!(config.is_configured(VendorId::ZenMux));
+        config.zenmux.api_key = None;
+        assert!(!config.is_configured(VendorId::ZenMux));
+        // SAFETY: the variable name is unique to this test, so no parallel
+        // test reads it; we remove it before returning.
+        unsafe {
+            std::env::set_var("ZENMUX_TEST_UNSET_ENV", "zmx-env");
+        }
+        assert!(config.is_configured(VendorId::ZenMux));
+        unsafe {
+            std::env::remove_var("ZENMUX_TEST_UNSET_ENV");
+        }
+        assert!(!config.is_configured(VendorId::ZenMux));
+    }
+
+    #[test]
     fn is_configured_counts_openrouter_named_account_keys() {
         let mut config = Config::default();
         config.openrouter.api_key_env = "OR_TEST_UNSET_ENV".into();
@@ -1604,6 +1657,14 @@ mod tests {
     fn tavily_inline_key_is_protected_like_other_api_keys() {
         let mut config = Config::default();
         config.tavily.api_key = Some("<redacted>".to_string());
+        assert!(config.has_inline_api_keys());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zenmux_inline_key_is_protected_like_other_api_keys() {
+        let mut config = Config::default();
+        config.zenmux.api_key = Some("<redacted>".to_string());
         assert!(config.has_inline_api_keys());
     }
 

@@ -301,6 +301,8 @@ pub enum Vendor {
     Tavily,
     Firecrawl,
     Requesty,
+    #[value(name = "zenmux")]
+    ZenMux,
 }
 
 impl Vendor {
@@ -327,6 +329,7 @@ impl Vendor {
             Vendor::Tavily => crate::vendor::VendorId::Tavily,
             Vendor::Firecrawl => crate::vendor::VendorId::Firecrawl,
             Vendor::Requesty => crate::vendor::VendorId::Requesty,
+            Vendor::ZenMux => crate::vendor::VendorId::ZenMux,
         }
     }
 }
@@ -420,6 +423,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::Tavily => Vendor::Tavily,
         crate::vendor::VendorId::Firecrawl => Vendor::Firecrawl,
         crate::vendor::VendorId::Requesty => Vendor::Requesty,
+        crate::vendor::VendorId::ZenMux => Vendor::ZenMux,
     }
 }
 
@@ -729,6 +733,13 @@ mod tests {
         cfg.ui.primary = Some(crate::vendor::VendorId::Openrouter);
         let active = Some(crate::vendor::VendorId::Zai);
         assert_eq!(cli.resolve_vendor_with(&cfg, active), Vendor::Openrouter);
+    }
+
+    #[test]
+    fn vendor_zenmux_parses_to_zenmux_variant() {
+        let cli = Cli::parse_from(["ai-usagebar", "--vendor", "zenmux"]);
+        assert_eq!(cli.vendor, Some(Vendor::ZenMux));
+        assert_eq!(cli.vendor.unwrap().to_id(), crate::vendor::VendorId::ZenMux);
     }
 
     #[test]

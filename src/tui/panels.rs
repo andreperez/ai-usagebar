@@ -229,6 +229,23 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
                 crate::requesty::vendor::severity(s),
             )],
         ),
+        VendorSnapshot::ZenMux(s) => match (&s.subscription, &s.payg) {
+            (Some(subscription), _) => (
+                subscription.tier.clone(),
+                vec![
+                    pct("5h", subscription.five_hour.window.utilization_pct),
+                    pct("7d", subscription.seven_day.window.utilization_pct),
+                ],
+            ),
+            (None, Some(payg)) => (
+                "ZenMux PAYG".into(),
+                vec![(
+                    format!("${:.2}", payg.total_credits),
+                    crate::zenmux::vendor::severity(s),
+                )],
+            ),
+            (None, None) => ("ZenMux".into(), vec![("—".into(), PaceSeverity::Critical)]),
+        },
     };
 
     for (text, _) in &mut cells {
@@ -293,6 +310,13 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         VendorSnapshot::SuperGrok(s) => Some(s.weekly_pct),
         VendorSnapshot::Tavily(s) => s.plan_pct(),
         VendorSnapshot::Firecrawl(s) => s.period_pct(),
+        VendorSnapshot::ZenMux(s) => s.subscription.as_ref().map(|subscription| {
+            subscription
+                .five_hour
+                .window
+                .utilization_pct
+                .max(subscription.seven_day.window.utilization_pct)
+        }),
         VendorSnapshot::Openrouter(_)
         | VendorSnapshot::Deepseek(_)
         | VendorSnapshot::Kilo(_)
@@ -363,6 +387,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::Tavily(s) => tavily_sections(s),
                 VendorSnapshot::Firecrawl(s) => firecrawl_sections(s, now),
                 VendorSnapshot::Requesty(s) => requesty_sections(s),
+                VendorSnapshot::ZenMux(s) => zenmux_sections(s, now),
             };
             // Inject the (already-absolute) fetched-at instant into the title
             // row, right-aligned. Pre-snapshotted in app::refresh_one so it
@@ -475,6 +500,14 @@ fn warning_label(
             ) =>
         {
             "Requesty API schema drift"
+        }
+        VendorSnapshot::ZenMux(_)
+            if matches!(
+                crate::zenmux::vendor::warning_kind(*code, message),
+                crate::zenmux::vendor::WarningKind::SchemaDrift
+            ) =>
+        {
+            "ZenMux API schema drift"
         }
         _ => "Warning",
     };
@@ -1271,6 +1304,85 @@ fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
     sections
 }
 
+fn zenmux_sections(s: &crate::usage::ZenMuxSnapshot, now: DateTime<Utc>) -> SectionBuilder {
+    let title = s
+        .subscription
+        .as_ref()
+        .map(|subscription| subscription.tier.clone())
+        .unwrap_or_else(|| "ZenMux PAYG".into());
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: title,
+        right: None,
+    }]);
+    if let Some(subscription) = &s.subscription {
+        sections.push(Section::Text {
+            label: "Status".into(),
+            value: subscription.status.as_str().into(),
+        });
+        push_zenmux_quota(&mut sections, "5h quota", &subscription.five_hour, now);
+        push_zenmux_quota(&mut sections, "7d quota", &subscription.seven_day, now);
+        sections.push(Section::Block {
+            label: "Monthly cap".into(),
+            body: vec![format!(
+                "{} flows · ${:.2}",
+                format_zenmux_flows(subscription.monthly_max_flows),
+                subscription.monthly_max_value_usd
+            )],
+        });
+        sections.push(Section::Text {
+            label: "Expires".into(),
+            value: countdown::format(Some(subscription.expires_at), now),
+        });
+    }
+    if let Some(payg) = &s.payg {
+        sections.push(Section::Text {
+            label: "PAYG balance".into(),
+            value: format!("${:.2}", payg.total_credits),
+        });
+        sections.push(Section::Text {
+            label: "Top-up / bonus".into(),
+            value: format!("${:.2} / ${:.2}", payg.top_up_credits, payg.bonus_credits),
+        });
+    }
+    sections
+}
+
+fn push_zenmux_quota(
+    sections: &mut SectionBuilder,
+    label: &str,
+    quota: &crate::usage::ZenMuxQuota,
+    now: DateTime<Utc>,
+) {
+    let pct = quota.window.utilization_pct.clamp(0, 100);
+    sections.push_metric(
+        Section::Metric {
+            label: label.into(),
+            pct: pct as u16,
+            severity: severity_for(pct),
+            value_label: format!(
+                "{} / {} flows",
+                format_zenmux_flows(quota.used_flows),
+                format_zenmux_flows(quota.max_flows)
+            ),
+            footnote: format!(
+                "${:.2} of ${:.2} · reset {}",
+                quota.used_value_usd,
+                quota.max_value_usd,
+                countdown::format(quota.window.resets_at, now)
+            ),
+        },
+        quota.window.resets_at,
+    );
+}
+
+fn format_zenmux_flows(flows: f64) -> String {
+    if flows.fract() == 0.0 {
+        format!("{flows:.0}")
+    } else {
+        format!("{flows:.2}")
+    }
+}
+
 fn push_window(
     sections: &mut SectionBuilder,
     label: &str,
@@ -1988,6 +2100,56 @@ mod tests {
         assert!(!sections.iter().any(|section| matches!(
             section,
             Section::Text { label, .. } if label == "Month to date" || label == "Usage interval"
+        )));
+    }
+
+    #[test]
+    fn zenmux_sections_preserve_quota_metrics_and_payg_balance() {
+        let now = now();
+        let quota = |pct, duration| crate::usage::ZenMuxQuota {
+            window: crate::usage::UsageWindow {
+                utilization_pct: pct,
+                resets_at: Some(now + duration),
+                window_duration: duration,
+            },
+            max_flows: 1000.0,
+            used_flows: 840.0,
+            remaining_flows: 160.0,
+            used_value_usd: 8.4,
+            max_value_usd: 10.0,
+        };
+        let snapshot = crate::usage::ZenMuxSnapshot {
+            payg: Some(crate::usage::ZenMuxPayg {
+                total_credits: 42.5,
+                top_up_credits: 30.0,
+                bonus_credits: 12.5,
+            }),
+            subscription: Some(crate::usage::ZenMuxSubscription {
+                tier: "Pro".into(),
+                plan_amount_usd: 20.0,
+                expires_at: now + chrono::Duration::days(20),
+                status: crate::usage::ZenMuxStatus::Healthy,
+                base_usd_per_flow: 0.01,
+                effective_usd_per_flow: 0.01,
+                five_hour: quota(84, chrono::Duration::hours(5)),
+                seven_day: quota(42, chrono::Duration::days(7)),
+                monthly_max_flows: 30_000.0,
+                monthly_max_value_usd: 300.0,
+            }),
+            scope_fingerprint: String::new(),
+        };
+        let sections = sections_for(&ready(VendorSnapshot::ZenMux(snapshot)), now, 5);
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Metric { label, pct, .. } if label == "5h quota" && *pct == 84
+        )));
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Metric { label, pct, .. } if label == "7d quota" && *pct == 42
+        )));
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Text { label, value } if label == "PAYG balance" && value == "$42.50"
         )));
     }
 

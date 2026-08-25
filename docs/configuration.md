@@ -18,7 +18,7 @@ settings.
 # primary = "anthropic"   # anthropic | anthropic_api | openai | zai
 #                         # | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | antigravity | cursor
-#                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl | requesty
+#                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl | requesty | zenmux
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui
@@ -145,6 +145,12 @@ api_key_env = "REQUESTY_API_KEY"
 # api_key = "..."          # used if REQUESTY_API_KEY is unset; chmod 600 the file!
 # Reads organization balance and requests month-to-date usage with resolution=day.
 # The optional usage endpoint is not grouped; a permission failure keeps balance visible.
+
+[zenmux]
+enabled = true             # disabled by default; requires a ZenMux Management API Key
+api_key_env = "ZENMUX_MANAGEMENT_API_KEY"
+# api_key = "..."          # used if ZENMUX_MANAGEMENT_API_KEY is unset; chmod 600 the file!
+# Standard inference keys are rejected. PAYG and subscription endpoints refresh independently.
 ```
 
 For more than one OpenRouter key, see the

@@ -50,5 +50,6 @@ pub mod vendor;
 pub mod waybar;
 pub mod widget;
 pub mod zai;
+pub mod zenmux;
 
 pub use error::{AppError, Result};

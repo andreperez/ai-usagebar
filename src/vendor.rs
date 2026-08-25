@@ -39,6 +39,7 @@ pub(crate) const VENDOR_SECRET_ENV_VARS: &[&str] = &[
     "TAVILY_API_KEY",
     "FIRECRAWL_API_KEY",
     "REQUESTY_API_KEY",
+    "ZENMUX_MANAGEMENT_API_KEY",
 ];
 
 pub(crate) fn vendor_secret_env_vars_to_remove(keep: &[&str]) -> Vec<&'static str> {
@@ -134,6 +135,8 @@ pub enum VendorId {
     Tavily,
     Firecrawl,
     Requesty,
+    #[value(name = "zenmux")]
+    ZenMux,
 }
 
 impl VendorId {
@@ -160,6 +163,7 @@ impl VendorId {
             VendorId::Tavily => "tavily",
             VendorId::Firecrawl => "firecrawl",
             VendorId::Requesty => "requesty",
+            VendorId::ZenMux => "zenmux",
         }
     }
 
@@ -189,6 +193,7 @@ impl VendorId {
             VendorId::Tavily => "Tavily",
             VendorId::Firecrawl => "Firecrawl",
             VendorId::Requesty => "Requesty",
+            VendorId::ZenMux => "ZenMux",
         }
     }
 
@@ -215,6 +220,7 @@ impl VendorId {
             VendorId::Tavily,
             VendorId::Firecrawl,
             VendorId::Requesty,
+            VendorId::ZenMux,
         ]
     }
 }
@@ -297,6 +303,12 @@ mod tests {
             serde_json::to_value(VendorId::Requesty).unwrap(),
             serde_json::json!("requesty")
         );
+        assert_eq!(VendorId::ZenMux.slug(), "zenmux");
+        assert_eq!(VendorId::ZenMux.display_name(), "ZenMux");
+        assert_eq!(
+            serde_json::to_value(VendorId::ZenMux).unwrap(),
+            serde_json::json!("zenmux")
+        );
     }
 
     #[test]
@@ -315,6 +327,7 @@ mod tests {
             "TAVILY_API_KEY",
             "FIRECRAWL_API_KEY",
             "REQUESTY_API_KEY",
+            "ZENMUX_MANAGEMENT_API_KEY",
         ];
         for name in configured_defaults {
             assert!(VENDOR_SECRET_ENV_VARS.contains(&name), "missing {name}");

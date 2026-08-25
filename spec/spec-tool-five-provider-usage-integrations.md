@@ -89,7 +89,7 @@ Define the implementation contract for adding five official usage providers as f
 - **REQ-027**: IF a redirect targets a different scheme/host/port, THEN the system shall not follow it and shall not forward `Authorization` or `x-api-key` headers.
 - **REQ-028**: IF a provider returns an unsupported plan or `403` for a secondary report endpoint (Vercel report on an ineligible plan; Tavily without report fields), THEN the system shall retain primary credit data, leave detail absent and surface a sanitized warning without retrying in a tight loop.
 - **REQ-029**: IF checked integer addition overflows or a monetary sum is non-finite while aggregating daily report rows (Requesty, Vercel), THEN the system shall treat the aggregation as a schema error rather than wrapping or producing `NaN`.
-- **REQ-030**: IF a historical row cannot be matched to the current billing period (Firecrawl) or an unknown account `status` is returned (ZenMux), THEN the system shall leave the detail absent (Firecrawl) or map to `Other(String)` with degraded severity (ZenMux) rather than selecting an arbitrary row or treating it as healthy.
+- **REQ-030**: IF a historical row cannot be matched to the current billing period (Firecrawl) or an unknown `account_status` is returned (ZenMux), THEN the system shall leave the detail absent (Firecrawl) or map to `Other(String)` with degraded severity (ZenMux) rather than selecting an arbitrary row or treating it as healthy.
 - **REQ-031**: IF the wire omits a reset timestamp, THEN the system shall set `resets_at = None` and shall produce no fabricated `reset_at` or pacing data.
 
 ## 3.5 Optional Requirements
@@ -448,8 +448,8 @@ the linked official reference remains authoritative if it changes.
 | Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage/historical?byApiKey=false` | same | 200 JSON: `success`, `periods:[{startDate,endDate,apiKey,totalCredits}]` | failure → partial current snapshot; unmatched period → absent detail |
 | Requesty | `GET https://api-v2.requesty.ai/v1/manage/org` | `Authorization: Bearer <REQUESTY_API_KEY>` | 200 JSON: `{name,balance}` | 401/403 redacted |
 | Requesty | `GET https://api-v2.requesty.ai/v1/manage/org/usage?start=...&end=...&resolution=day` | same | 200 JSON: `usage:{period:{spend,total_requests,input_tokens,output_tokens,total_tokens}}` | omit optional `group_by`; failure → partial primary snapshot |
-| ZenMux | `GET https://zenmux.ai/api/v1/management/payg/balance` | `Authorization: Bearer <ZENMUX_MANAGEMENT_API_KEY>` | 200 JSON: `total, topUp, bonus` USD | either block alone suffices |
-| ZenMux | `GET https://zenmux.ai/api/v1/management/subscription/detail` | same | 200 JSON: `tier,status,expiry,windows:[{type,usage_percentage,limit}]` | `usage_percentage` 0.0..1.0 fraction |
+| ZenMux | `GET https://zenmux.ai/api/v1/management/payg/balance` | `Authorization: Bearer <ZENMUX_MANAGEMENT_API_KEY>` | 200 JSON: `success,data:{currency,total_credits,top_up_credits,bonus_credits}` | either block alone suffices; standard keys return management-key diagnostics |
+| ZenMux | `GET https://zenmux.ai/api/v1/management/subscription/detail` | same | 200 JSON: `success,data:{plan,account_status,quota_5_hour,quota_7_day,quota_monthly}` | `usage_percentage` is a 0.0..1.0 fraction; `422` is rate limiting |
 | Vercel | `GET https://ai-gateway.vercel.sh/v1/credits` | `Authorization: Bearer <AI_GATEWAY_API_KEY or OIDC>` | 200 JSON: `balance, total_used` USD | always required |
 | Vercel | `GET https://ai-gateway.vercel.sh/v1/report?from=...&to=...&groupBy=day` | same | 200 JSON: `data:[{day,cost,input_tokens,output_tokens,requests}]` | 403/unsupported → credits retained |
 
@@ -503,12 +503,18 @@ pub struct RequestyUsage {
     pub total_tokens: u64,
 }
 
-pub enum ZenMuxStatus { Active, PastDue, Canceled, Other(String) }
-pub struct ZenMuxPayg { pub total: f64, pub top_up: f64, pub bonus: f64 }
+pub enum ZenMuxStatus { Healthy, Monitored, Abusive, Suspended, Banned, Other(String) }
+pub struct ZenMuxPayg { pub total_credits: f64, pub top_up_credits: f64, pub bonus_credits: f64 }
+pub struct ZenMuxQuota {
+    pub window: UsageWindow,
+    pub max_flows: f64, pub used_flows: f64, pub remaining_flows: f64,
+    pub used_value_usd: f64, pub max_value_usd: f64,
+}
 pub struct ZenMuxSubscription {
-    pub tier: String, pub status: ZenMuxStatus, pub expiry: Option<DateTime<Utc>>,
-    pub five_hour: UsageWindow, pub seven_day: UsageWindow,
-    pub monthly_max: u64, pub flow_count: u64, pub usd_value: f64,
+    pub tier: String, pub plan_amount_usd: f64, pub expires_at: DateTime<Utc>,
+    pub status: ZenMuxStatus, pub base_usd_per_flow: f64, pub effective_usd_per_flow: f64,
+    pub five_hour: ZenMuxQuota, pub seven_day: ZenMuxQuota,
+    pub monthly_max_flows: f64, pub monthly_max_value_usd: f64,
 }
 pub struct ZenMuxSnapshot {
     pub payg: Option<ZenMuxPayg>,
@@ -535,7 +541,7 @@ pub struct VercelReport {
 | Tavily | `tav` | `{plan}`, `{session_pct}` when plan % exists | `{tav_plan}`, `{tav_plan_pct}`, `{tav_plan_used}`, `{tav_plan_limit}`, `{tav_payg_used}`, `{tav_key_used}`, `{tav_search}`, `{tav_extract}`, `{tav_crawl}`, `{tav_map}`, `{tav_research}` |
 | Firecrawl | `fcw` | `{session_pct}`, `{weekly_pct}` map to period % when available | `{fcw_remaining}`, `{fcw_plan}`, `{fcw_used}`, `{fcw_pct}`, `{fcw_reset}` |
 | Requesty | `rqy` | `{plan}` aliases org name | `{rqy_org}`, `{rqy_balance}`, `{rqy_mtd}`, `{rqy_requests}`, `{rqy_tokens}`, `{rqy_input}`, `{rqy_output}` |
-| ZenMux | `zmx` | `{session_pct}`, `{weekly_pct}` worst subscription window | `{zmx_payg}`, `{zmx_topup}`, `{zmx_bonus}`, `{zmx_tier}`, `{zmx_status}`, `{zmx_five}`, `{zmx_seven}`, `{zmx_expiry}` |
+| ZenMux | `zmx` | `{session_pct}`, `{weekly_pct}` subscription windows when available | `{zmx_headline}`, `{zmx_payg}`, `{zmx_topup}`, `{zmx_bonus}`, `{zmx_tier}`, `{zmx_status}`, `{zmx_five}`, `{zmx_seven}`, `{zmx_expiry}` |
 | Vercel AI Gateway | `vag` | `{session_pct}` not used (balance-only unless report) | `{vag_balance}`, `{vag_used}`, `{vag_mtd}`, `{vag_requests}`, `{vag_input}`, `{vag_output}` |
 
 Balance-only placeholders render as `Text` (`$D.CC`) or `Block`; no fake `Metric`.
@@ -581,7 +587,7 @@ Ordering is the configured `ui.active_vendors` scope (or legacy enabled-and-conf
 - **AC-008**: Given Requesty `GET /v1/manage/org` succeeds but `/v1/manage/org/usage` returns 403, When rendering, Then balance and org name display with a sanitized warning and token/cost totals are absent rather than zero.
 - **AC-009**: Given ZenMux with valid PAYG and subscription, When fetching concurrently, Then snapshot contains both blocks and severity is the worst of five-hour/seven-day windows.
 - **AC-010**: Given ZenMux PAYG valid but subscription returns 401 with standard key, When rendering, Then the system shows PAYG balance with a "management key required" diagnostic and does not treat the account as healthy.
-- **AC-011**: Given ZenMux `usage_percentage = 0.84` and `status = "grace_period_unknown"`, When parsing, Then pct converts to `84` via round and status maps to `Other("grace_period_unknown")` with degraded severity.
+- **AC-011**: Given ZenMux `usage_percentage = 0.84` and `account_status = "grace_period_unknown"`, When parsing, Then pct converts to `84` via round and status maps to `Other("grace_period_unknown")` with degraded severity.
 - **AC-012**: Given Vercel with `report_enabled = false`, When the report cache is expired, Then the system never calls `/v1/report` and credits still refresh on the 60 s TTL.
 - **AC-013**: Given Vercel with `report_enabled = true` and `report_cache_ttl_seconds = 21600`, When `/v1/credits` succeeds and `/v1/report` returns 403 unsupported plan, Then credits display as balance with a sanitized warning and report totals remain absent without blocking credits.
 - **AC-014**: Given Vercel report returns daily rows for August, When aggregating, Then `mtd_cost` and token/request totals equal finite/checked sums and lifetime `total_used` is not confused with month-to-date cost.
@@ -709,15 +715,21 @@ Aggregation uses `checked_add` for integers and `finite_amount` for `spend`; `re
 
 ```json
 // PAYG
-{ "total": 42.5, "topUp": 30.0, "bonus": 12.5 }
+{ "success": true, "data": {
+  "currency": "usd", "total_credits": 42.5,
+  "top_up_credits": 30.0, "bonus_credits": 12.5
+}}
 // Subscription
-{ "tier": "Pro", "status": "active", "expiry": "2026-09-15T00:00:00Z",
-  "windows": [
-    { "type": "five_hour", "usage_percentage": 0.84, "limit": 1000 },
-    { "type": "seven_day", "usage_percentage": 0.42, "limit": 7000 }
-  ], "monthlyMax": 5000, "flowCount": 1234, "usdValue": 89.1 }
+{ "success": true, "data": {
+  "plan": { "tier": "pro", "amount_usd": 20, "interval": "month", "expires_at": "2026-09-15T00:00:00Z" },
+  "currency": "usd", "base_usd_per_flow": 0.01, "effective_usd_per_flow": 0.01,
+  "account_status": "healthy",
+  "quota_5_hour": { "usage_percentage": 0.84, "resets_at": "2026-08-24T15:00:00Z", "max_flows": 1000, "used_flows": 840, "remaining_flows": 160, "used_value_usd": 8.4, "max_value_usd": 10 },
+  "quota_7_day": { "usage_percentage": 0.42, "resets_at": "2026-08-29T12:00:00Z", "max_flows": 7000, "used_flows": 2940, "remaining_flows": 4060, "used_value_usd": 29.4, "max_value_usd": 70 },
+  "quota_monthly": { "max_flows": 30000, "max_value_usd": 300 }
+}}
 ```
-`0.84 → 84%`, `0.42 → 42%`; worst is `84%`. Unknown `status` like `"grace_period"` → `Other("grace_period")` with degraded severity, never healthy.
+`0.84 → 84%`, `0.42 → 42%`; worst is `84%`. Unknown `account_status` like `"grace_period"` maps to `Other("grace_period")` with degraded severity, never healthy.
 
 ## 11.5 Vercel Report Confusion Guard
 
@@ -745,7 +757,7 @@ Aggregation uses `checked_add` for integers and `finite_amount` for `spend`; `re
 | 8 | Body 2.1 MiB chunked | `read_body_capped` rejects with "exceeds the 2 MiB limit" and does not cache. |
 | 9 | Cross-origin 302 to `https://evil.example` | Redirect not followed; `Authorization` / `x-api-key` not forwarded. |
 | 10 | Historical row `startDate` is non-RFC3339 | Secondary detail becomes partial/absent; primary data remains usable. |
-| 11 | Unknown ZenMux `status = "suspended_pending_review"` | `Other("suspended_pending_review")`, severity degraded, never treated as Active. |
+| 11 | Unknown ZenMux `account_status = "suspended_pending_review"` | `Other("suspended_pending_review")`, severity degraded, never treated as healthy. |
 | 12 | Vercel OIDC env overridden to `MY_GATEWAY_TOKEN` | Key resolved from `MY_GATEWAY_TOKEN`; fingerprint binds to env-var name + token hash. |
 
 # 12. Validation Criteria

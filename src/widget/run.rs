@@ -37,6 +37,7 @@ use crate::widget::cli::{Cli, Vendor};
 use crate::widget::pretty::print_pretty;
 use crate::widget::render::{DEFAULT_FORMAT, RenderInput, render_anthropic};
 use crate::zai;
+use crate::zenmux;
 
 /// Entry point — runs to completion and ALWAYS returns Ok with exit code 0
 /// in the caller. Mirrors claudebar's `die()` invariant.
@@ -166,6 +167,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         Vendor::Tavily => tavily_output(cli, &config).await,
         Vendor::Firecrawl => firecrawl_output(cli, &config).await,
         Vendor::Requesty => requesty_output(cli, &config).await,
+        Vendor::ZenMux => zenmux_output(cli, &config).await,
     }
 }
 
@@ -855,6 +857,36 @@ async fn requesty_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
         &theme,
         &opts,
         now,
+    ))
+}
+
+async fn zenmux_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
+    let api_key = crate::config::resolve_api_key(
+        "ZenMux",
+        &config.zenmux.api_key_env,
+        config.zenmux.api_key.as_deref(),
+    )?;
+    let client = http_client()?;
+    let cache = vendor_cache(cli, "zenmux")?;
+    let endpoints = zenmux::fetch::Endpoints::default();
+    let outcome =
+        match zenmux::fetch_snapshot(&client, &api_key, &cache, &endpoints, DEFAULT_TTL).await {
+            Ok(outcome) => outcome,
+            Err(error) if error.is_transient() => {
+                return Ok(WaybarOutput::loading(cli.icon.as_deref()));
+            }
+            Err(error) => return Err(error),
+        };
+    let theme = theme_from_cli(cli);
+    let snapshot = outcome.snapshot.clone();
+    let vendor_outcome: VendorOutcome = outcome.into();
+    let opts = RenderOpts::from_cli(cli);
+    Ok(zenmux::vendor::render(
+        &vendor_outcome,
+        &snapshot,
+        &theme,
+        &opts,
+        chrono::Utc::now(),
     ))
 }
 

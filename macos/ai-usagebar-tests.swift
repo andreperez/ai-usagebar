@@ -198,7 +198,7 @@ func testDefaultEnabled() {
     for id in ["anthropic", "openai", "zai", "openrouter"] {
         assertEqual(defaultEnabled(id), true, "\(id) defaults enabled")
     }
-    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty"] {
+    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux"] {
         assertEqual(defaultEnabled(id), false, "\(id) defaults disabled (opt-in)")
     }
 }
@@ -266,6 +266,18 @@ func testParserBalances() {
                        fields: fields(through: 31, set: [31: "$42.50"]))
     assertEqual(rqy?.creditBalance, "$42.50", "requesty balance value")
     assertEqual(rqy?.hasUsageWindows, false, "requesty suppresses 5h/7d windows")
+
+    // ZenMux: PAYG balance at 32 plus optional subscription quota windows.
+    let zmx = snapshot(FORMAT, vendor: "zenmux",
+                       fields: fields(through: 32, set: [1: "84", 2: "1h", 3: "42", 4: "2d", 32: "$10.00"]))
+    assertEqual(zmx?.creditBalance, "$10.00", "zenmux PAYG balance value")
+    assertEqual(zmx?.hasUsageWindows, true, "zenmux subscription windows remain visible")
+    assertEqual(zmx?.session?.pct, 84, "zenmux five-hour quota value")
+
+    let zmxSubscriptionOnly = snapshot(FORMAT, vendor: "zenmux",
+                                       fields: fields(through: 32, set: [1: "84", 2: "1h", 3: "42", 4: "2d", 32: "—"]))
+    assertNil(zmxSubscriptionOnly?.creditBalance, "zenmux omits unavailable PAYG balance")
+    assertEqual(zmxSubscriptionOnly?.hasUsageWindows, true, "zenmux keeps subscription windows without PAYG")
 
     // Anthropic API with a monthly limit → spend-vs-limit bar, no duplicate
     // session/weekly, and no headline balance (the bar replaces it).

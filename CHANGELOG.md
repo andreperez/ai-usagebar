@@ -35,6 +35,9 @@ Each release is also published at
   management API. The ungrouped `resolution=day` usage map is aggregated with
   checked counters; a usage permission failure keeps the live balance visible
   with a sanitized warning.
+- ZenMux PAYG balance and subscription management quotas. PAYG and subscription
+  blocks refresh independently, so either valid block remains visible with a
+  sanitized diagnostic when the other endpoint fails.
 
 ## [1.4.0] — 2026-08-21
 

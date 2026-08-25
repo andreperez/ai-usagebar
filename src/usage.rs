@@ -359,6 +359,7 @@ pub enum VendorSnapshot {
     Tavily(TavilySnapshot),
     Firecrawl(FirecrawlSnapshot),
     Requesty(RequestySnapshot),
+    ZenMux(ZenMuxSnapshot),
 }
 
 /// Tavily — credit usage from the documented `GET /usage` endpoint. Tavily
@@ -469,6 +470,78 @@ pub struct RequestyUsage {
 }
 
 impl Eq for RequestyUsage {}
+
+/// ZenMux PAYG balance, subscription quotas, and the management-key scope that
+/// produced them. Either the PAYG or subscription block can be absent when the
+/// corresponding endpoint fails independently.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZenMuxSnapshot {
+    pub payg: Option<ZenMuxPayg>,
+    pub subscription: Option<ZenMuxSubscription>,
+    pub scope_fingerprint: String,
+}
+
+impl Eq for ZenMuxSnapshot {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZenMuxPayg {
+    pub total_credits: f64,
+    pub top_up_credits: f64,
+    pub bonus_credits: f64,
+}
+
+impl Eq for ZenMuxPayg {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ZenMuxStatus {
+    Healthy,
+    Monitored,
+    Abusive,
+    Suspended,
+    Banned,
+    Other(String),
+}
+
+impl ZenMuxStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::Monitored => "monitored",
+            Self::Abusive => "abusive",
+            Self::Suspended => "suspended",
+            Self::Banned => "banned",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZenMuxQuota {
+    pub window: UsageWindow,
+    pub max_flows: f64,
+    pub used_flows: f64,
+    pub remaining_flows: f64,
+    pub used_value_usd: f64,
+    pub max_value_usd: f64,
+}
+
+impl Eq for ZenMuxQuota {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZenMuxSubscription {
+    pub tier: String,
+    pub plan_amount_usd: f64,
+    pub expires_at: DateTime<Utc>,
+    pub status: ZenMuxStatus,
+    pub base_usd_per_flow: f64,
+    pub effective_usd_per_flow: f64,
+    pub five_hour: ZenMuxQuota,
+    pub seven_day: ZenMuxQuota,
+    pub monthly_max_flows: f64,
+    pub monthly_max_value_usd: f64,
+}
+
+impl Eq for ZenMuxSubscription {}
 
 /// Google Antigravity 2.0 / CLI snapshot. The API groups models into Gemini
 /// and third-party (Claude/GPT) buckets, and each group carries its own 5-hour

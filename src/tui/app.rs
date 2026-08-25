@@ -842,6 +842,19 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
             .await?;
             Ok(outcome.into())
         }
+        VendorId::ZenMux => {
+            let api_key = crate::config::resolve_api_key(
+                "ZenMux",
+                &config.zenmux.api_key_env,
+                config.zenmux.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("zenmux")?;
+            let endpoints = crate::zenmux::fetch::Endpoints::default();
+            let outcome =
+                crate::zenmux::fetch_snapshot(client, &api_key, &cache, &endpoints, DEFAULT_TTL)
+                    .await?;
+            Ok(outcome.into())
+        }
     }
 }
 

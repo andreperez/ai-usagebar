@@ -81,15 +81,15 @@ let POINT_CRITICAL_MIN = 10
 // populated — and the `aapi_*` fields (23-26) carry the Anthropic API headline
 // plus its spend-vs-limit bar. `cursor_total_pct` (27) is followed by the
 // Antigravity-only fourth-window fields (28-30), followed by Requesty's
-// balance at 31. A final literal sentinel absorbs the widget's stale suffix,
-// preserving these fields.
+// balance at 31 and ZenMux's PAYG balance at 32. A final literal sentinel
+// absorbs the widget's stale suffix, preserving these fields.
 let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_reset};;" +
              "{sonnet_pct};;{sonnet_reset};;{extra_pct};;{extra_spent};;{extra_limit};;" +
              "{scoped_model};;{scoped_pct};;{scoped_reset};;" +
              "{session_elapsed};;{weekly_elapsed};;{scoped_elapsed};;{vendor_short};;{or_balance};;" +
              "{ds_balance};;{kilo_balance};;{nv_balance};;{km_balance};;{grok_balance};;" +
              "{aapi_headline};;{aapi_pct};;{aapi_spent};;{aapi_limit};;{cursor_total_pct};;" +
-              "{extra_model};;{extra_reset};;{extra_elapsed};;{rqy_balance}"
+              "{extra_model};;{extra_reset};;{extra_elapsed};;{rqy_balance};;{zmx_payg}"
 
 let FORMAT_WITH_SENTINEL = FORMAT + ";;__aiub_end__"
 
@@ -454,12 +454,16 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
     case "grok": balanceFieldIndex = 22
     case "anthropic_api": balanceFieldIndex = 23
     case "requesty": balanceFieldIndex = 31
+    case "zenmux": balanceFieldIndex = 32
     default: balanceFieldIndex = nil
     }
-    let balance = balanceFieldIndex.flatMap { t($0).isEmpty ? nil : t($0) }
+    let balance = balanceFieldIndex.flatMap {
+        let value = t($0)
+        return value.isEmpty || value == "—" ? nil : value
+    }
     // Vendors with no rate-limit windows show only a balance; suppress the fake
     // 5h/7d 0% rows their session_pct/weekly_pct aliases would otherwise paint.
-    let balanceOnly = balanceFieldIndex != nil
+    let balanceOnly = balanceFieldIndex != nil && vendor != "zenmux"
     // Anthropic API exposes spend-vs-limit instead of a balance, and reports the
     // spend % through the session/weekly aliases. When a limit is configured it
     // becomes an extra ($) bar; otherwise it is balance-only headline display.
@@ -489,8 +493,9 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
         secondaryWeekly = nil
         secondaryWeeklyLabel = ""
     }
+    let hasUsageWindows = vendor == "zenmux" ? (session != nil || weekly != nil) : !balanceOnly
     return Snapshot(plan: t(0),
-                    hasUsageWindows: !balanceOnly,
+                    hasUsageWindows: hasUsageWindows,
                     creditBalance: displayBalance,
                     session: quotaWindow(1, 2, 13),
                     weekly: quotaWindow(3, 4, 14),
@@ -549,6 +554,7 @@ let VENDOR_AUTH: [VendorAuth] = [
     VendorAuth(id: "tavily", name: "Tavily", kind: "apikey", cli: "", login: "", pkg: "", env: "TAVILY_API_KEY"),
     VendorAuth(id: "firecrawl", name: "Firecrawl", kind: "apikey", cli: "", login: "", pkg: "", env: "FIRECRAWL_API_KEY"),
     VendorAuth(id: "requesty", name: "Requesty", kind: "apikey", cli: "", login: "", pkg: "", env: "REQUESTY_API_KEY"),
+    VendorAuth(id: "zenmux", name: "ZenMux", kind: "apikey", cli: "", login: "", pkg: "", env: "ZENMUX_MANAGEMENT_API_KEY"),
     // Cursor has no API key: the binary reads the session token the Cursor IDE
     // wrote to its own state.vscdb. `kind: "local"` marks the "configured =
     // signed in to the app" case (like Antigravity below), with no login CLI
@@ -1109,7 +1115,7 @@ func addAccountScript(binary: String, label: String, desktop: Bool) -> String {
 func defaultEnabled(_ id: String) -> Bool {
     switch id {
     case "anthropic", "openai", "zai", "openrouter": return true
-    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty": return false
+    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux": return false
     default: return true
     }
 }

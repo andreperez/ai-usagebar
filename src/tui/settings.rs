@@ -140,6 +140,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         section: "requesty",
         note: "org balance & usage",
     },
+    KeyVendor {
+        id: VendorId::ZenMux,
+        label: "ZenMux",
+        env: "ZENMUX_MANAGEMENT_API_KEY",
+        section: "zenmux",
+        note: "management key — PAYG + subscription",
+    },
 ];
 
 /// Read the inline `api_key` currently in config for a given section, so the
@@ -160,6 +167,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "tavily" => cfg.tavily.api_key.as_deref(),
         "firecrawl" => cfg.firecrawl.api_key.as_deref(),
         "requesty" => cfg.requesty.api_key.as_deref(),
+        "zenmux" => cfg.zenmux.api_key.as_deref(),
         _ => None,
     }
 }
@@ -933,6 +941,7 @@ fn configured_key_env<'a>(cfg: &'a Config, section: &str, fallback: &'a str) -> 
         "tavily" => &cfg.tavily.api_key_env,
         "firecrawl" => &cfg.firecrawl.api_key_env,
         "requesty" => &cfg.requesty.api_key_env,
+        "zenmux" => &cfg.zenmux.api_key_env,
         _ => fallback,
     }
 }
@@ -1549,6 +1558,7 @@ mod tests {
             VendorId::Tavily,
             VendorId::Firecrawl,
             VendorId::Requesty,
+            VendorId::ZenMux,
         ] {
             assert!(
                 KEY_VENDORS.iter().any(|kv| kv.id == id),
@@ -1576,6 +1586,23 @@ mod tests {
         let s = SettingsState::from_config(&cfg);
         assert_eq!(s.keys[key_index(VendorId::Requesty)].buf, "rqy-inline");
         assert!(s.configured[key_index(VendorId::Requesty)]);
+    }
+
+    #[test]
+    fn zenmux_key_vendor_uses_the_management_contract() {
+        let kv = KEY_VENDORS
+            .iter()
+            .find(|kv| kv.id == VendorId::ZenMux)
+            .unwrap();
+        assert_eq!(kv.label, "ZenMux");
+        assert_eq!(kv.env, "ZENMUX_MANAGEMENT_API_KEY");
+        assert_eq!(kv.section, "zenmux");
+        assert_eq!(kv.note, "management key — PAYG + subscription");
+        let mut cfg = Config::default();
+        cfg.zenmux.api_key = Some("zmx-inline".into());
+        let state = SettingsState::from_config(&cfg);
+        assert_eq!(state.keys[key_index(VendorId::ZenMux)].buf, "zmx-inline");
+        assert!(state.configured[key_index(VendorId::ZenMux)]);
     }
 
     #[test]
