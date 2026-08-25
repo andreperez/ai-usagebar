@@ -300,6 +300,7 @@ pub enum Vendor {
     OpenCodeGo,
     Tavily,
     Firecrawl,
+    Requesty,
 }
 
 impl Vendor {
@@ -325,6 +326,7 @@ impl Vendor {
             Vendor::OpenCodeGo => crate::vendor::VendorId::OpenCodeGo,
             Vendor::Tavily => crate::vendor::VendorId::Tavily,
             Vendor::Firecrawl => crate::vendor::VendorId::Firecrawl,
+            Vendor::Requesty => crate::vendor::VendorId::Requesty,
         }
     }
 }
@@ -417,6 +419,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::OpenCodeGo => Vendor::OpenCodeGo,
         crate::vendor::VendorId::Tavily => Vendor::Tavily,
         crate::vendor::VendorId::Firecrawl => Vendor::Firecrawl,
+        crate::vendor::VendorId::Requesty => Vendor::Requesty,
     }
 }
 
@@ -471,6 +474,16 @@ mod tests {
         assert_eq!(opencode.vendor, Some(Vendor::OpenCodeGo));
         let login = Cli::parse_from(["ai-usagebar", "auth", "nous", "login"]);
         assert!(matches!(login.command, Some(Command::Auth { .. })));
+    }
+
+    #[test]
+    fn vendor_requesty_parses_to_requesty_variant() {
+        let cli = Cli::parse_from(["ai-usagebar", "--vendor", "requesty"]);
+        assert_eq!(cli.vendor, Some(Vendor::Requesty));
+        assert_eq!(
+            cli.vendor.unwrap().to_id(),
+            crate::vendor::VendorId::Requesty
+        );
     }
 
     #[test]

@@ -437,17 +437,17 @@ Validation rules:
 ## 6.2 HTTP Contracts
 
 Response field names for slices not yet implemented remain illustrative pending
-per-slice verification against official docs (CON-003, GUD-001). Firecrawl's
-field names below and in §11.2 were verified against the published v2 OpenAPI
-schema; the linked official reference remains authoritative if it changes.
+per-slice verification against official docs (CON-003, GUD-001). Firecrawl and
+Requesty field names below were verified against their published API references;
+the linked official reference remains authoritative if it changes.
 
 | Provider | Method & URL | Auth | Success | Error handling |
 |----------|--------------|------|---------|----------------|
 | Tavily | `GET https://api.tavily.com/usage` | `Authorization: Bearer <TAVILY_API_KEY>` + optional `X-Project-ID` | 200 JSON: `plan`, `limits`, `payAsYouGo`, `apiKeyUsage`, endpoint breakdown | 401/403 redacted; missing fields → Schema; non-finite → Schema |
 | Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage` | `Authorization: Bearer <FIRECRAWL_API_KEY>` | 200 JSON: `success`, `data:{remainingCredits,planCredits,billingPeriodStart,billingPeriodEnd}` | current data remains primary; 401/403 redacted |
 | Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage/historical?byApiKey=false` | same | 200 JSON: `success`, `periods:[{startDate,endDate,apiKey,totalCredits}]` | failure → partial current snapshot; unmatched period → absent detail |
-| Requesty | `GET https://api-v2.requesty.ai/v1/manage/org` | `Authorization: Bearer <REQUESTY_API_KEY>` | 200 JSON: `organization:{name,balance}` | 403 insufficient scope → sanitized warning |
-| Requesty | `GET https://api-v2.requesty.ai/v1/manage/org/usage?start=...&end=...&resolution=daily&groupBy=none` | same | 200 JSON: `data:[{date,cost,requests,input_tokens,output_tokens}]` | aggregate with checked add |
+| Requesty | `GET https://api-v2.requesty.ai/v1/manage/org` | `Authorization: Bearer <REQUESTY_API_KEY>` | 200 JSON: `{name,balance}` | 401/403 redacted |
+| Requesty | `GET https://api-v2.requesty.ai/v1/manage/org/usage?start=...&end=...&resolution=day` | same | 200 JSON: `usage:{period:{spend,total_requests,input_tokens,output_tokens,total_tokens}}` | omit optional `group_by`; failure → partial primary snapshot |
 | ZenMux | `GET https://zenmux.ai/api/v1/management/payg/balance` | `Authorization: Bearer <ZENMUX_MANAGEMENT_API_KEY>` | 200 JSON: `total, topUp, bonus` USD | either block alone suffices |
 | ZenMux | `GET https://zenmux.ai/api/v1/management/subscription/detail` | same | 200 JSON: `tier,status,expiry,windows:[{type,usage_percentage,limit}]` | `usage_percentage` 0.0..1.0 fraction |
 | Vercel | `GET https://ai-gateway.vercel.sh/v1/credits` | `Authorization: Bearer <AI_GATEWAY_API_KEY or OIDC>` | 200 JSON: `balance, total_used` USD | always required |
@@ -489,13 +489,18 @@ pub struct FirecrawlSnapshot {
 pub struct RequestySnapshot {
     pub org_name: String,
     pub balance: f64,
-    pub mtd_cost: f64,
+    pub usage: Option<RequestyUsage>,
+    pub interval_start: DateTime<Utc>,
+    pub interval_end: DateTime<Utc>,
+    pub scope_fingerprint: String,
+}
+
+pub struct RequestyUsage {
+    pub mtd_spend: f64,
     pub requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
-    pub interval: (DateTime<Utc>, DateTime<Utc>),
-    pub scope_fingerprint: String,
 }
 
 pub enum ZenMuxStatus { Active, PastDue, Canceled, Other(String) }
@@ -630,7 +635,7 @@ Ordering is the configured `ui.active_vendors` scope (or legacy enabled-and-conf
 
 - **EXT-001**: Tavily API `api.tavily.com` — HTTPS GET `/usage`, Bearer auth, optional `X-Project-ID`.
 - **EXT-002**: Firecrawl API `api.firecrawl.dev` — HTTPS GET `/v2/team/credit-usage` + `/v2/team/credit-usage/historical?byApiKey=false`.
-- **EXT-003**: Requesty API `api-v2.requesty.ai` — HTTPS GET `/v1/manage/org` + `/v1/manage/org/usage` (UTC range, `resolution=daily&groupBy=none`).
+- **EXT-003**: Requesty API `api-v2.requesty.ai` — HTTPS GET `/v1/manage/org` + `/v1/manage/org/usage` (UTC range, `resolution=day`, optional `group_by` omitted for organization totals).
 - **EXT-004**: ZenMux API `zenmux.ai` — HTTPS GET `/api/v1/management/payg/balance` + `/api/v1/management/subscription/detail` (Bearer management key).
 - **EXT-005**: Vercel AI Gateway `ai-gateway.vercel.sh` — HTTPS GET `/v1/credits` + opt-in `/v1/report` (`from/to/groupBy=day`).
 
@@ -693,12 +698,12 @@ Only the `2026-08-01` row matches; `2026-07-01` is ignored. `period_consumed = 1
 ## 11.3 Requesty Daily Aggregation
 
 ```json
-{ "data": [
-  { "date": "2026-08-01", "cost": 1.25, "requests": 10, "input_tokens": 1200, "output_tokens": 800 },
-  { "date": "2026-08-02", "cost": 0.75, "requests": 5, "input_tokens": 600, "output_tokens": 400 }
-]}
+{ "usage": {
+  "2026-08-01": { "spend": 1.25, "total_requests": 10, "input_tokens": 1200, "output_tokens": 800, "total_tokens": 2000 },
+  "2026-08-02": { "spend": 0.75, "total_requests": 5, "input_tokens": 600, "output_tokens": 400, "total_tokens": 1000 }
+}}
 ```
-Aggregation uses `checked_add` for integers and `finite_amount` for `cost`; `requests=15`, `input=1800`, `output=1200`, `total=3000`, `cost=2.00`. Clock injection fixes `start = 2026-08-01T00:00:00Z`.
+Aggregation uses `checked_add` for integers and `finite_amount` for `spend`; `requests=15`, `input=1800`, `output=1200`, `total=3000`, `spend=2.00`. Clock injection fixes `start = 2026-08-01T00:00:00Z`.
 
 ## 11.4 ZenMux Mixed Blocks
 
@@ -732,7 +737,7 @@ Aggregation uses `checked_add` for integers and `finite_amount` for `cost`; `req
 |---|----------|----------|
 | 1 | Tavily returns `planUsage.limit = 0` | No plan % metric; text headline + endpoint breakdown remain. |
 | 2 | Firecrawl `remainingCredits > planCredits` (packs present) | Both values shown; pct computed on `planCredits` only; remaining shown separately. |
-| 3 | Requesty `resolution` returns empty `data` at month start | Totals `0`; interval still `YYYY-MM-01T00:00:00Z` to `now`. |
+| 3 | Requesty `resolution=day` returns an empty `usage` map at month start | Totals `0`; interval still `YYYY-MM-01T00:00:00Z` to `now`. |
 | 4 | ZenMux standard inference key used | `401 invalid key type` → diagnostic says "management key required", no retry loop. |
 | 5 | ZenMux `422 rate limited` | Sanitized `.last_error` with retry diagnostic; not redacted as auth. |
 | 6 | Vercel `report_cache_ttl_seconds = 0` in config | `Config::validate` rejects with "report_cache_ttl_seconds must be between 300 and 86400". |

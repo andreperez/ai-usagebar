@@ -31,6 +31,10 @@ Each release is also published at
   remaining credits, plan credits, matching historical billing-period usage,
   and reset metadata. Historical usage is optional and never suppresses live
   current-credit data when unavailable.
+- Requesty organization balance and month-to-date usage from the documented
+  management API. The ungrouped `resolution=day` usage map is aggregated with
+  checked counters; a usage permission failure keeps the live balance visible
+  with a sanitized warning.
 
 ## [1.4.0] — 2026-08-21
 

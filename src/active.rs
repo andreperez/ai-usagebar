@@ -119,6 +119,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "opencode-go" => Some(VendorId::OpenCodeGo),
         "tavily" => Some(VendorId::Tavily),
         "firecrawl" => Some(VendorId::Firecrawl),
+        "requesty" => Some(VendorId::Requesty),
         _ => None,
     }
 }
@@ -180,6 +181,12 @@ mod tests {
     fn parse_slug_unknown_returns_none() {
         assert!(parse_slug("not-a-vendor").is_none());
         assert!(parse_slug("").is_none());
+    }
+
+    #[test]
+    fn parse_slug_requesty_round_trips() {
+        assert_eq!(parse_slug("requesty"), Some(VendorId::Requesty));
+        assert_eq!(VendorId::Requesty.slug(), "requesty");
     }
 
     #[test]

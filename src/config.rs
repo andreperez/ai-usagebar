@@ -59,6 +59,7 @@ pub struct Config {
     pub opencode_go: OpenCodeGoConfig,
     pub tavily: TavilyConfig,
     pub firecrawl: FirecrawlConfig,
+    pub requesty: RequestyConfig,
 }
 
 /// UI / dispatch preferences: active providers control automatic refresh and
@@ -554,6 +555,30 @@ impl Default for FirecrawlConfig {
     }
 }
 
+/// Requesty — organization balance & usage from the documented management API.
+/// The API authenticates with a `Bearer` token from `REQUESTY_API_KEY` and has
+/// no extra configuration fields beyond the key.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RequestyConfig {
+    pub enabled: bool,
+    /// Env var name to read the key from (env wins over `api_key`).
+    pub api_key_env: String,
+    /// Inline key fallback. Config files containing this field are protected
+    /// with mode 0600 on Unix.
+    pub api_key: Option<String>,
+}
+
+impl Default for RequestyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "REQUESTY_API_KEY".to_string(),
+            api_key: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ZaiConfig {
@@ -1042,6 +1067,7 @@ impl Config {
             self.opencode_go.api_key.as_deref(),
             self.tavily.api_key.as_deref(),
             self.firecrawl.api_key.as_deref(),
+            self.requesty.api_key.as_deref(),
         ]
         .into_iter()
         .chain(
@@ -1098,6 +1124,7 @@ impl Config {
             VendorId::OpenCodeGo => self.opencode_go.enabled,
             VendorId::Tavily => self.tavily.enabled,
             VendorId::Firecrawl => self.firecrawl.enabled,
+            VendorId::Requesty => self.requesty.enabled,
         }
     }
 
@@ -1161,6 +1188,9 @@ impl Config {
                 &self.firecrawl.api_key_env,
                 self.firecrawl.api_key.as_deref(),
             ),
+            VendorId::Requesty => {
+                env_or_inline(&self.requesty.api_key_env, self.requesty.api_key.as_deref())
+            }
             // OAuth / local-state vendors (Claude, Codex, Nous, Cursor, Kiro,
             // Antigravity, SuperGrok) resolve their credential at fetch time.
             _ => true,
@@ -1420,6 +1450,7 @@ mod tests {
             VendorId::Kiro,
             VendorId::Tavily,
             VendorId::Firecrawl,
+            VendorId::Requesty,
         ] {
             assert!(!c.is_enabled(opt_in), "{opt_in:?}");
         }
@@ -1482,6 +1513,9 @@ mod tests {
         assert!(!config.is_enabled(VendorId::Firecrawl));
         assert_eq!(config.firecrawl.api_key_env, "FIRECRAWL_API_KEY");
         assert!(config.firecrawl.api_key.is_none());
+        assert!(!config.is_enabled(VendorId::Requesty));
+        assert_eq!(config.requesty.api_key_env, "REQUESTY_API_KEY");
+        assert!(config.requesty.api_key.is_none());
     }
 
     #[test]
@@ -1521,6 +1555,27 @@ mod tests {
     }
 
     #[test]
+    fn requesty_is_configured_follows_inline_keys_and_env() {
+        let mut config = Config::default();
+        config.requesty.api_key_env = "REQUESTY_TEST_UNSET_ENV".into();
+        assert!(!config.is_configured(VendorId::Requesty));
+        config.requesty.api_key = Some("rqy-test".into());
+        assert!(config.is_configured(VendorId::Requesty));
+        config.requesty.api_key = None;
+        assert!(!config.is_configured(VendorId::Requesty));
+        // SAFETY: the variable name is unique to this test, so no parallel
+        // test reads it; we remove it before returning.
+        unsafe {
+            std::env::set_var("REQUESTY_TEST_UNSET_ENV", "rqy-env");
+        }
+        assert!(config.is_configured(VendorId::Requesty));
+        unsafe {
+            std::env::remove_var("REQUESTY_TEST_UNSET_ENV");
+        }
+        assert!(!config.is_configured(VendorId::Requesty));
+    }
+
+    #[test]
     fn is_configured_counts_openrouter_named_account_keys() {
         let mut config = Config::default();
         config.openrouter.api_key_env = "OR_TEST_UNSET_ENV".into();
@@ -1549,6 +1604,14 @@ mod tests {
     fn tavily_inline_key_is_protected_like_other_api_keys() {
         let mut config = Config::default();
         config.tavily.api_key = Some("<redacted>".to_string());
+        assert!(config.has_inline_api_keys());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn requesty_inline_key_is_protected_like_other_api_keys() {
+        let mut config = Config::default();
+        config.requesty.api_key = Some("<redacted>".to_string());
         assert!(config.has_inline_api_keys());
     }
 

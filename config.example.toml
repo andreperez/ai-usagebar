@@ -16,6 +16,7 @@
 # Valid: anthropic | anthropic_api | openai | zai | openrouter | deepseek
 #        | kimi | kilo | novita | moonshot | grok | supergrok | antigravity
 #        | cursor | minimax | kiro | nous | opencode-go | tavily | firecrawl
+#        | requesty
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
@@ -319,3 +320,12 @@ api_key_env = "TAVILY_API_KEY"
 enabled = false
 api_key_env = "FIRECRAWL_API_KEY"
 # api_key = "fc-..."              # fallback; chmod 600 the file if you use it
+
+# Requesty — organization balance & usage from the documented management API.
+# Opt-in; disabled until you set a key (env var or inline). The API
+# authenticates with a Bearer token from REQUESTY_API_KEY and has no extra
+# configuration fields.
+[requesty]
+enabled = false
+api_key_env = "REQUESTY_API_KEY"  # checked first; if set + non-empty, used
+# api_key = "..."                 # fallback; chmod 600 the file if you use it

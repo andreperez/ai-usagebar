@@ -133,6 +133,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         section: "firecrawl",
         note: "credits & billing period",
     },
+    KeyVendor {
+        id: VendorId::Requesty,
+        label: "Requesty",
+        env: "REQUESTY_API_KEY",
+        section: "requesty",
+        note: "org balance & usage",
+    },
 ];
 
 /// Read the inline `api_key` currently in config for a given section, so the
@@ -152,6 +159,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "opencode-go" => cfg.opencode_go.api_key.as_deref(),
         "tavily" => cfg.tavily.api_key.as_deref(),
         "firecrawl" => cfg.firecrawl.api_key.as_deref(),
+        "requesty" => cfg.requesty.api_key.as_deref(),
         _ => None,
     }
 }
@@ -922,6 +930,9 @@ fn configured_key_env<'a>(cfg: &'a Config, section: &str, fallback: &'a str) -> 
         "grok" => &cfg.grok.api_key_env,
         "minimax" => &cfg.minimax.api_key_env,
         "opencode-go" => &cfg.opencode_go.api_key_env,
+        "tavily" => &cfg.tavily.api_key_env,
+        "firecrawl" => &cfg.firecrawl.api_key_env,
+        "requesty" => &cfg.requesty.api_key_env,
         _ => fallback,
     }
 }
@@ -1535,6 +1546,9 @@ mod tests {
             VendorId::Novita,
             VendorId::Moonshot,
             VendorId::Grok,
+            VendorId::Tavily,
+            VendorId::Firecrawl,
+            VendorId::Requesty,
         ] {
             assert!(
                 KEY_VENDORS.iter().any(|kv| kv.id == id),
@@ -1544,6 +1558,24 @@ mod tests {
         // OAuth vendors are intentionally absent.
         assert!(!KEY_VENDORS.iter().any(|kv| kv.id == VendorId::Anthropic));
         assert!(!KEY_VENDORS.iter().any(|kv| kv.id == VendorId::Openai));
+    }
+
+    #[test]
+    fn requesty_key_vendor_uses_the_documented_contract() {
+        let kv = KEY_VENDORS
+            .iter()
+            .find(|kv| kv.id == VendorId::Requesty)
+            .unwrap();
+        assert_eq!(kv.label, "Requesty");
+        assert_eq!(kv.env, "REQUESTY_API_KEY");
+        assert_eq!(kv.section, "requesty");
+        assert_eq!(kv.note, "org balance & usage");
+        // The overlay pre-fills an inline key already in config.
+        let mut cfg = Config::default();
+        cfg.requesty.api_key = Some("rqy-inline".into());
+        let s = SettingsState::from_config(&cfg);
+        assert_eq!(s.keys[key_index(VendorId::Requesty)].buf, "rqy-inline");
+        assert!(s.configured[key_index(VendorId::Requesty)]);
     }
 
     #[test]

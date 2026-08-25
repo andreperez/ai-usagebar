@@ -358,6 +358,7 @@ pub enum VendorSnapshot {
     OpenCodeGo(crate::opencode_go::types::Usage),
     Tavily(TavilySnapshot),
     Firecrawl(FirecrawlSnapshot),
+    Requesty(RequestySnapshot),
 }
 
 /// Tavily — credit usage from the documented `GET /usage` endpoint. Tavily
@@ -442,6 +443,32 @@ impl FirecrawlSnapshot {
         Some(pct.min(i32::MAX as u128) as i32)
     }
 }
+
+/// Requesty organization balance plus optional month-to-date management usage.
+/// The usage endpoint can require a scope unavailable to a valid balance key,
+/// so its aggregate remains absent rather than being reported as zero.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestySnapshot {
+    pub org_name: String,
+    pub balance: f64,
+    pub usage: Option<RequestyUsage>,
+    pub interval_start: chrono::DateTime<chrono::Utc>,
+    pub interval_end: chrono::DateTime<chrono::Utc>,
+    pub scope_fingerprint: String,
+}
+
+impl Eq for RequestySnapshot {}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequestyUsage {
+    pub mtd_spend: f64,
+    pub requests: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+}
+
+impl Eq for RequestyUsage {}
 
 /// Google Antigravity 2.0 / CLI snapshot. The API groups models into Gemini
 /// and third-party (Claude/GPT) buckets, and each group carries its own 5-hour

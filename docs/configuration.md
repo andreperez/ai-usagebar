@@ -18,7 +18,7 @@ settings.
 # primary = "anthropic"   # anthropic | anthropic_api | openai | zai
 #                         # | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | antigravity | cursor
-#                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl
+#                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl | requesty
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui
@@ -138,6 +138,13 @@ api_key_env = "TAVILY_API_KEY"
 enabled = true             # disabled by default; enable once you add an API key
 api_key_env = "FIRECRAWL_API_KEY"
 # api_key = "fc-..."       # used if FIRECRAWL_API_KEY is unset; chmod 600 the file!
+
+[requesty]
+enabled = true             # disabled by default; enable once you add a management API key
+api_key_env = "REQUESTY_API_KEY"
+# api_key = "..."          # used if REQUESTY_API_KEY is unset; chmod 600 the file!
+# Reads organization balance and requests month-to-date usage with resolution=day.
+# The optional usage endpoint is not grouped; a permission failure keeps balance visible.
 ```
 
 For more than one OpenRouter key, see the

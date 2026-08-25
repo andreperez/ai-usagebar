@@ -697,6 +697,44 @@ mod tests {
     }
 
     #[test]
+    fn requesty_json_carries_text_rows_without_fabricated_percentages() {
+        use crate::usage::{RequestySnapshot, RequestyUsage};
+
+        let state = TabState::Ready(Box::new(ReadyTab {
+            snapshot: VendorSnapshot::Requesty(RequestySnapshot {
+                org_name: "Acme Corp".into(),
+                balance: 42.5,
+                usage: Some(RequestyUsage {
+                    mtd_spend: 3.75,
+                    requests: 17,
+                    input_tokens: 2100,
+                    output_tokens: 1400,
+                    total_tokens: 3500,
+                }),
+                interval_start: "2026-08-01T00:00:00Z".parse().unwrap(),
+                interval_end: "2026-08-24T12:34:56Z".parse().unwrap(),
+                scope_fingerprint: String::new(),
+            }),
+            stale: false,
+            last_error: None,
+            fetched_at: None,
+        }));
+        let projected = entry_from_state(&TabId::vendor(VendorId::Requesty), &state, Utc::now());
+        let rendered = render_json_for_primary(&[projected], None);
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        let entry = &value["entries"][0];
+        assert_eq!(entry["id"], "requesty");
+        assert_eq!(entry["display_name"], "Requesty");
+        assert_eq!(entry["plan"], "Acme Corp");
+        assert!(entry["metrics"].as_array().unwrap().is_empty());
+        assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
+            section["type"] == "text"
+                && section["label"] == "Month to date"
+                && section["value"] == "$3.75 · 17 requests"
+        }));
+    }
+
+    #[test]
     fn failed_entries_do_not_duplicate_tui_retry_rows() {
         let failed = entry_from_state(
             &TabId::vendor(VendorId::Openai),

@@ -65,6 +65,7 @@ use ai_usagebar::kiro;
 use ai_usagebar::minimax;
 use ai_usagebar::openai;
 use ai_usagebar::openrouter;
+use ai_usagebar::requesty;
 use ai_usagebar::supergrok;
 use ai_usagebar::tavily;
 use ai_usagebar::zai;
@@ -435,6 +436,55 @@ async fn firecrawl_live() {
         out.snapshot.plan_credits,
         out.snapshot.period_consumed,
         out.snapshot.billing_period_end,
+    );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn requesty_live() {
+    let Ok(api_key) = std::env::var("REQUESTY_API_KEY") else {
+        eprintln!(
+            "requesty_live: REQUESTY_API_KEY is unset — skipping optional Requesty smoke test"
+        );
+        return;
+    };
+    if api_key.trim().is_empty() {
+        eprintln!(
+            "requesty_live: REQUESTY_API_KEY is empty — skipping optional Requesty smoke test"
+        );
+        return;
+    }
+    let cache = xdg_cache_for("requesty");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoints = requesty::fetch::Endpoints::default();
+    let out = requesty::fetch_snapshot(
+        &client,
+        &api_key,
+        &cache,
+        &endpoints,
+        chrono::Utc::now(),
+        Duration::ZERO,
+    )
+    .await
+    .expect("requesty fetch should succeed against the real API");
+    assert!(
+        !out.snapshot.org_name.trim().is_empty(),
+        "requesty organization name must be non-empty"
+    );
+    assert!(
+        out.snapshot.balance.is_finite(),
+        "requesty balance must be finite"
+    );
+    if let Some(usage) = &out.snapshot.usage {
+        assert!(usage.mtd_spend.is_finite() && usage.mtd_spend >= 0.0);
+    }
+    println!(
+        "requesty — balance={}, usage_available={}",
+        out.snapshot.balance,
+        out.snapshot.usage.is_some()
     );
 }
 

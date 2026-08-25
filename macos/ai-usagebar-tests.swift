@@ -198,7 +198,7 @@ func testDefaultEnabled() {
     for id in ["anthropic", "openai", "zai", "openrouter"] {
         assertEqual(defaultEnabled(id), true, "\(id) defaults enabled")
     }
-    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl"] {
+    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty"] {
         assertEqual(defaultEnabled(id), false, "\(id) defaults disabled (opt-in)")
     }
 }
@@ -260,6 +260,12 @@ func testParserBalances() {
     let grk = snapshot(FORMAT, vendor: "grok",
                        fields: fields(through: 22, set: [22: "$9.99"]))
     assertEqual(grk?.creditBalance, "$9.99", "grok balance value")
+
+    // Requesty: balance at 31, appended to preserve every prior field index.
+    let rqy = snapshot(FORMAT, vendor: "requesty",
+                       fields: fields(through: 31, set: [31: "$42.50"]))
+    assertEqual(rqy?.creditBalance, "$42.50", "requesty balance value")
+    assertEqual(rqy?.hasUsageWindows, false, "requesty suppresses 5h/7d windows")
 
     // Anthropic API with a monthly limit → spend-vs-limit bar, no duplicate
     // session/weekly, and no headline balance (the bar replaces it).

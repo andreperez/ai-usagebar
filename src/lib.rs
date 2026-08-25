@@ -38,6 +38,7 @@ pub mod openrouter;
 pub mod pacing;
 pub mod pango;
 pub mod report;
+pub mod requesty;
 pub mod safe_storage;
 pub mod supergrok;
 pub mod tavily;

@@ -18,6 +18,7 @@ metrics expand to an empty string unless noted otherwise.
 | Antigravity | `agy` | Cursor | `cur` |
 | MiniMax | `mmx` | Kiro CLI | `kir` |
 | Tavily | `tav` | Firecrawl | `fcw` |
+| Requesty | `rqy` | | |
 
 Use `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and `{weekly_reset}`
 when one format must work across providers. Providers without matching time
@@ -241,3 +242,20 @@ and `{fcw_reset}` report the documented team credit endpoints.
   billing period.
 - `{session_pct}` and `{weekly_pct}` alias the current-period percentage when
   available; reset aliases use the billing-period countdown.
+
+## Requesty
+
+`{rqy_headline}`, `{rqy_org}`, `{rqy_balance}`, `{rqy_mtd}`, `{rqy_requests}`,
+`{rqy_tokens}`, `{rqy_input}`, and `{rqy_output}` report organization balance
+and optional month-to-date management usage.
+
+- `{rqy_headline}` and `{rqy_balance}` are USD balances. `{plan}` aliases the
+  organization name.
+- `{rqy_mtd}` is month-to-date spend. Request and token placeholders are
+  aggregate totals returned by the ungrouped `resolution=day` query.
+- If the usage endpoint is unavailable or the key lacks permission, all
+  `{rqy_*}` usage placeholders are `—`; the live organization balance remains
+  available.
+- Requesty has no rolling quota denominator or reset timestamp, so
+  `{session_pct}` and `{weekly_pct}` are neutral `0` values and reset aliases
+  are `—`.

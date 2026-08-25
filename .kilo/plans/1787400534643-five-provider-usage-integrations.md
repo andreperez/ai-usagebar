@@ -33,7 +33,7 @@ Extend `ai-usagebar` with native Rust support for **Tavily**, **Firecrawl**, **R
 |---|---|---|---|---|
 | Tavily | `Authorization: Bearer TAVILY_API_KEY`; optional `X-Project-ID: <id>` | `GET https://api.tavily.com/usage` | Same response: key/account limits, plan, pay-as-you-go, and endpoint breakdown | Single endpoint; no reset timestamp unless API adds one. **REV**: `X-Project-ID` header only when `project_id` is non-empty; must be part of cache scope fingerprint. |
 | Firecrawl | `Authorization: Bearer FIRECRAWL_API_KEY` | `GET https://api.firecrawl.dev/v2/team/credit-usage` | `GET /v2/team/credit-usage/historical?byApiKey=false` | **REV**: historical query `byApiKey=false` is required — `true` would scope to one key and undercount team usage. |
-| Requesty | `Authorization: Bearer REQUESTY_API_KEY` (management read) | `GET https://api-v2.requesty.ai/v1/manage/org` | `GET /v1/manage/org/usage?start=<RFC3339>&end=<RFC3339>&resolution=daily&groupBy=none` | **REV**: bounds are first-of-month 00:00:00Z to now, built from injected clock for hermetic tests. |
+| Requesty | `Authorization: Bearer REQUESTY_API_KEY` (management read) | `GET https://api-v2.requesty.ai/v1/manage/org` | `GET /v1/manage/org/usage?start=<RFC3339>&end=<RFC3339>&resolution=day` | **REV**: omit the optional `group_by` parameter for organization totals; bounds are first-of-month 00:00:00Z to now, built from an injected clock for hermetic tests. |
 | ZenMux | `Authorization: Bearer ZENMUX_MANAGEMENT_API_KEY` (standard inference keys are invalid) | `GET https://zenmux.ai/api/v1/management/payg/balance` | `GET /api/v1/management/subscription/detail` | **REV**: either block may succeed alone; standard-key 401/403 must surface as "management key required" without leaking key material. |
 | Vercel AI Gateway | `Authorization: Bearer AI_GATEWAY_API_KEY` (env-overrideable to OIDC token) | `GET https://ai-gateway.vercel.sh/v1/credits` | Opt-in `GET /v1/report?from=<RFC3339>&to=<RFC3339>&groupBy=day` | **REV**: report is paid/beta, restricted to eligible plans; `403` or "unsupported plan" must not suppress credits. Configurable env var name defaults to `AI_GATEWAY_API_KEY`. |
 
@@ -71,8 +71,8 @@ Official documentation is authoritative. Before implementing each slice, recheck
 
 ### Requesty
 
-- Snapshot: organization name, balance (USD), month-to-date spend (USD), request counts, input/output/total tokens, and queried interval `[start, end)`.
-- Aggregate all returned daily entries with checked integer addition and finite monetary addition.
+- Snapshot: organization name, balance (USD), optional month-to-date spend (USD), request counts, input/output/total tokens, and queried interval `[start, end]`.
+- Aggregate the documented `usage` map values with checked integer addition and finite monetary addition.
 - Headline: balance. Detailed spend and token rows remain non-percentage text because no budget denominator is reported.
 - **REV**: `vendor_short = rqy`; single `Tool`/`Section::Text` spend row plus `Block` for token totals; no fake `consumed_pct`.
 
@@ -122,12 +122,22 @@ Official documentation is authoritative. Before implementing each slice, recheck
 
 **Slice notes**: official response fields are `success/data.remainingCredits/planCredits/billingPeriodStart/billingPeriodEnd` and `success/periods[].startDate/endDate/apiKey/totalCredits`; the live service may return `creditsUsed` as the historical count and `endDate = null` for the active month, both supported. The historical route is queried with `byApiKey=false`. Current credit data remains live when historical detail fails; `usage --json` retains the primary data and sanitized warning.
 
-### 4. Requesty Vertical Slice
+### 4. Requesty Vertical Slice  ✅ (done 2026-08-24; verified against official management API schema)
 
-- Create `src/requesty/{mod,types,fetch,vendor}.rs`.
-- Query organization and month-to-date usage concurrently; build RFC 3339 UTC bounds (`YYYY-MM-01T00:00:00Z` to now) from an injected clock (`Clock` trait / `now: DateTime<Utc>` param) for hermetic tests.
-- Aggregate daily usage with checked integer addition and finite monetary addition; preserve live organization balance when usage fails or permission (`403`) is insufficient — surface sanitized warning.
-- Add non-percentage report rows, all interface mappings, mocked permission and partial-failure cases, documentation, and ignored live smoke coverage.
+- [x] Create `src/requesty/{mod,types,fetch,vendor}.rs`.
+- [x] Query organization and month-to-date usage concurrently; build RFC 3339 UTC bounds (`YYYY-MM-01T00:00:00Z` to now) from an injected clock (`now: DateTime<Utc>` param), request `resolution=day`, and omit optional `group_by` for hermetic tests.
+- [x] Aggregate the documented `usage` map values with checked integer addition and finite monetary addition; preserve live organization balance when usage fails or permission (`403`) is insufficient — surface sanitized warning.
+- [x] Add non-percentage report rows, all interface mappings, mocked permission and partial-failure cases, documentation, and ignored live smoke coverage.
+
+**Slice notes**: official Requesty responses are top-level `{name,balance}` for
+organization and `usage:{period:{spend,total_requests,input_tokens,output_tokens,total_tokens}}`
+for organization usage. The cached secondary diagnostic is stored with the
+request's scope fingerprint, preventing one API key's warning from appearing on
+another key's cached snapshot. `make test`, `make desktop-test`, `cargo fmt`,
+`cargo test --all-targets --locked`, and `cargo machete` pass. Strict Clippy is
+blocked only by existing Windows dead-code warnings in `src/nous/credentials.rs`.
+macOS Swift tests and QML lint are pending because their platform tools are not
+available here; the release TUI executable remains locked by a running process.
 
 ### 5. ZenMux Vertical Slice
 

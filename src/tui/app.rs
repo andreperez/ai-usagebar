@@ -823,6 +823,25 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
                     .await?;
             Ok(outcome.into())
         }
+        VendorId::Requesty => {
+            let api_key = crate::config::resolve_api_key(
+                "Requesty",
+                &config.requesty.api_key_env,
+                config.requesty.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("requesty")?;
+            let endpoints = crate::requesty::fetch::Endpoints::default();
+            let outcome = crate::requesty::fetch_snapshot(
+                client,
+                &api_key,
+                &cache,
+                &endpoints,
+                Utc::now(),
+                DEFAULT_TTL,
+            )
+            .await?;
+            Ok(outcome.into())
+        }
     }
 }
 

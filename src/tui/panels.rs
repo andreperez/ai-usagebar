@@ -222,6 +222,13 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
                 .unwrap_or_else(|| ("—".into(), PaceSeverity::Low));
             ("Firecrawl".into(), vec![cell])
         }
+        VendorSnapshot::Requesty(s) => (
+            s.org_name.clone(),
+            vec![(
+                format!("${:.2}", s.balance),
+                crate::requesty::vendor::severity(s),
+            )],
+        ),
     };
 
     for (text, _) in &mut cells {
@@ -291,7 +298,8 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         | VendorSnapshot::Kilo(_)
         | VendorSnapshot::Novita(_)
         | VendorSnapshot::Moonshot(_)
-        | VendorSnapshot::Grok(_) => None,
+        | VendorSnapshot::Grok(_)
+        | VendorSnapshot::Requesty(_) => None,
     }
 }
 
@@ -354,6 +362,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::OpenCodeGo(s) => opencode_go_sections(s, now),
                 VendorSnapshot::Tavily(s) => tavily_sections(s),
                 VendorSnapshot::Firecrawl(s) => firecrawl_sections(s, now),
+                VendorSnapshot::Requesty(s) => requesty_sections(s),
             };
             // Inject the (already-absolute) fetched-at instant into the title
             // row, right-aligned. Pre-snapshotted in app::refresh_one so it
@@ -458,6 +467,14 @@ fn warning_label(
             ) =>
         {
             "Firecrawl API schema drift"
+        }
+        VendorSnapshot::Requesty(_)
+            if matches!(
+                crate::requesty::vendor::warning_kind(*code, message),
+                crate::requesty::vendor::WarningKind::SchemaDrift
+            ) =>
+        {
+            "Requesty API schema drift"
         }
         _ => "Warning",
     };
@@ -1220,6 +1237,40 @@ fn firecrawl_sections(s: &crate::usage::FirecrawlSnapshot, now: DateTime<Utc>) -
     v
 }
 
+fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: s.org_name.clone(),
+        right: None,
+    }]);
+    sections.push(Section::Spacer);
+    sections.push(Section::Text {
+        label: "Balance".into(),
+        value: format!("${:.2}", s.balance),
+    });
+    if let Some(usage) = &s.usage {
+        sections.push(Section::Text {
+            label: "Month to date".into(),
+            value: format!("${:.2} · {} requests", usage.mtd_spend, usage.requests),
+        });
+        sections.push(Section::Block {
+            label: "Tokens".into(),
+            body: vec![format!(
+                "input {} · output {} · total {}",
+                usage.input_tokens, usage.output_tokens, usage.total_tokens
+            )],
+        });
+        sections.push(Section::Text {
+            label: "Usage interval".into(),
+            value: format!(
+                "{} to {}",
+                s.interval_start.to_rfc3339(),
+                s.interval_end.to_rfc3339()
+            ),
+        });
+    }
+    sections
+}
+
 fn push_window(
     sections: &mut SectionBuilder,
     label: &str,
@@ -1883,6 +1934,60 @@ mod tests {
                     && value_label == "9%"
                     && footnote.contains("91 / 1000")
                     && footnote.contains("1617 remaining")
+        )));
+    }
+
+    #[test]
+    fn requesty_sections_keep_balance_and_usage_as_non_percentage_rows() {
+        let snapshot = crate::usage::RequestySnapshot {
+            org_name: "Acme Corp".into(),
+            balance: 42.5,
+            usage: Some(crate::usage::RequestyUsage {
+                mtd_spend: 3.75,
+                requests: 17,
+                input_tokens: 2100,
+                output_tokens: 1400,
+                total_tokens: 3500,
+            }),
+            interval_start: "2026-08-01T00:00:00Z".parse().unwrap(),
+            interval_end: "2026-08-24T12:34:56Z".parse().unwrap(),
+            scope_fingerprint: String::new(),
+        };
+        let sections = sections_for(&ready(VendorSnapshot::Requesty(snapshot)), now(), 5);
+        assert!(
+            !sections
+                .iter()
+                .any(|section| matches!(section, Section::Metric { .. }))
+        );
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Text { label, value } if label == "Balance" && value == "$42.50"
+        )));
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Block { label, body }
+                if label == "Tokens" && body.iter().any(|line| line.contains("total 3500"))
+        )));
+    }
+
+    #[test]
+    fn requesty_partial_sections_omit_usage_rows_and_interval() {
+        let snapshot = crate::usage::RequestySnapshot {
+            org_name: "Acme Corp".into(),
+            balance: 42.5,
+            usage: None,
+            interval_start: "2026-08-01T00:00:00Z".parse().unwrap(),
+            interval_end: "2026-08-24T12:34:56Z".parse().unwrap(),
+            scope_fingerprint: String::new(),
+        };
+        let sections = sections_for(&ready(VendorSnapshot::Requesty(snapshot)), now(), 5);
+        assert!(sections.iter().any(|section| matches!(
+            section,
+            Section::Text { label, value } if label == "Balance" && value == "$42.50"
+        )));
+        assert!(!sections.iter().any(|section| matches!(
+            section,
+            Section::Text { label, .. } if label == "Month to date" || label == "Usage interval"
         )));
     }
 
