@@ -360,6 +360,7 @@ pub enum VendorSnapshot {
     Firecrawl(FirecrawlSnapshot),
     Requesty(RequestySnapshot),
     ZenMux(ZenMuxSnapshot),
+    VercelGateway(VercelGatewaySnapshot),
 }
 
 /// Tavily — credit usage from the documented `GET /usage` endpoint. Tavily
@@ -542,6 +543,30 @@ pub struct ZenMuxSubscription {
 }
 
 impl Eq for ZenMuxSubscription {}
+
+/// Vercel AI Gateway credit balance plus optional, independently cached
+/// month-to-date custom-reporting totals.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VercelGatewaySnapshot {
+    pub balance: f64,
+    pub total_used: f64,
+    pub report: Option<VercelReport>,
+    pub scope_fingerprint: String,
+}
+
+impl Eq for VercelGatewaySnapshot {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VercelReport {
+    pub mtd_cost: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub requests: u64,
+    pub interval_start: DateTime<Utc>,
+    pub interval_end: DateTime<Utc>,
+}
+
+impl Eq for VercelReport {}
 
 /// Google Antigravity 2.0 / CLI snapshot. The API groups models into Gemini
 /// and third-party (Claude/GPT) buckets, and each group carries its own 5-hour

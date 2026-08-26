@@ -303,6 +303,8 @@ pub enum Vendor {
     Requesty,
     #[value(name = "zenmux")]
     ZenMux,
+    #[value(name = "vercel-ai-gateway")]
+    VercelGateway,
 }
 
 impl Vendor {
@@ -330,6 +332,7 @@ impl Vendor {
             Vendor::Firecrawl => crate::vendor::VendorId::Firecrawl,
             Vendor::Requesty => crate::vendor::VendorId::Requesty,
             Vendor::ZenMux => crate::vendor::VendorId::ZenMux,
+            Vendor::VercelGateway => crate::vendor::VendorId::VercelGateway,
         }
     }
 }
@@ -424,6 +427,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::Firecrawl => Vendor::Firecrawl,
         crate::vendor::VendorId::Requesty => Vendor::Requesty,
         crate::vendor::VendorId::ZenMux => Vendor::ZenMux,
+        crate::vendor::VendorId::VercelGateway => Vendor::VercelGateway,
     }
 }
 

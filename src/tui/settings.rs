@@ -825,6 +825,7 @@ fn vendor_config_section(vendor: VendorId) -> &'static str {
         VendorId::Firecrawl => "firecrawl",
         VendorId::Requesty => "requesty",
         VendorId::ZenMux => "zenmux",
+        VendorId::VercelGateway => "vercel-ai-gateway",
     }
 }
 

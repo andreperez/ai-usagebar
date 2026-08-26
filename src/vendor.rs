@@ -40,6 +40,7 @@ pub(crate) const VENDOR_SECRET_ENV_VARS: &[&str] = &[
     "FIRECRAWL_API_KEY",
     "REQUESTY_API_KEY",
     "ZENMUX_MANAGEMENT_API_KEY",
+    "AI_GATEWAY_API_KEY",
 ];
 
 pub(crate) fn vendor_secret_env_vars_to_remove(keep: &[&str]) -> Vec<&'static str> {
@@ -137,6 +138,9 @@ pub enum VendorId {
     Requesty,
     #[value(name = "zenmux")]
     ZenMux,
+    #[value(name = "vercel-ai-gateway")]
+    #[serde(rename = "vercel-ai-gateway")]
+    VercelGateway,
 }
 
 impl VendorId {
@@ -164,6 +168,7 @@ impl VendorId {
             VendorId::Firecrawl => "firecrawl",
             VendorId::Requesty => "requesty",
             VendorId::ZenMux => "zenmux",
+            VendorId::VercelGateway => "vercel-ai-gateway",
         }
     }
 
@@ -194,6 +199,7 @@ impl VendorId {
             VendorId::Firecrawl => "Firecrawl",
             VendorId::Requesty => "Requesty",
             VendorId::ZenMux => "ZenMux",
+            VendorId::VercelGateway => "Vercel AI Gateway",
         }
     }
 
@@ -221,6 +227,7 @@ impl VendorId {
             VendorId::Firecrawl,
             VendorId::Requesty,
             VendorId::ZenMux,
+            VendorId::VercelGateway,
         ]
     }
 }

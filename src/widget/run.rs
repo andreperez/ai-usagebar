@@ -32,6 +32,7 @@ use crate::supergrok;
 use crate::tavily;
 use crate::theme::Theme;
 use crate::vendor::{HTTP_CLIENT_TIMEOUT, RenderOpts, VendorOutcome};
+use crate::vercel_gateway;
 use crate::waybar::WaybarOutput;
 use crate::widget::cli::{Cli, Vendor};
 use crate::widget::pretty::print_pretty;
@@ -168,6 +169,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         Vendor::Firecrawl => firecrawl_output(cli, &config).await,
         Vendor::Requesty => requesty_output(cli, &config).await,
         Vendor::ZenMux => zenmux_output(cli, &config).await,
+        Vendor::VercelGateway => vercel_gateway_output(cli, &config).await,
     }
 }
 
@@ -887,6 +889,37 @@ async fn zenmux_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
         &theme,
         &opts,
         chrono::Utc::now(),
+    ))
+}
+
+async fn vercel_gateway_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
+    let api_key = crate::config::resolve_api_key(
+        "Vercel AI Gateway",
+        &config.vercel_gateway.api_key_env,
+        config.vercel_gateway.api_key.as_deref(),
+    )?;
+    let client = http_client()?;
+    let cache = vendor_cache(cli, "vercel-ai-gateway")?;
+    let now = chrono::Utc::now();
+    let outcome = vercel_gateway::fetch_snapshot(
+        &client,
+        &api_key,
+        &config.vercel_gateway.api_key_env,
+        &cache,
+        &vercel_gateway::fetch::Endpoints::default(),
+        config.vercel_gateway.report_enabled,
+        std::time::Duration::from_secs(config.vercel_gateway.report_cache_ttl_seconds),
+        DEFAULT_TTL,
+        now,
+    )
+    .await?;
+    let snapshot = outcome.snapshot.clone();
+    Ok(vercel_gateway::vendor::render(
+        &outcome.into(),
+        &snapshot,
+        &theme_from_cli(cli),
+        &RenderOpts::from_cli(cli),
+        now,
     ))
 }
 

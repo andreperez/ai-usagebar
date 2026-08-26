@@ -47,6 +47,7 @@ pub mod tooltip;
 pub mod tui;
 pub mod usage;
 pub mod vendor;
+pub mod vercel_gateway;
 pub mod waybar;
 pub mod widget;
 pub mod zai;

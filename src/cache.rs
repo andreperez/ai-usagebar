@@ -81,6 +81,16 @@ impl Cache {
         self.dir.join(".fetch.lock")
     }
 
+    /// An independent cache payload in the same vendor directory. Detail
+    /// endpoints with a slower refresh cadence use their own payload, lock, and
+    /// diagnostic files so they never delay or clear the primary cache.
+    pub fn detail(&self, name: &'static str) -> DetailCache {
+        DetailCache {
+            dir: self.dir.clone(),
+            name,
+        }
+    }
+
     /// Age of the payload (`None` if it doesn't exist). Used by the widget to
     /// decide whether the 60s cache window applies.
     pub fn payload_age(&self) -> Option<Duration> {
@@ -202,6 +212,71 @@ impl Cache {
         // them this way, only the reader threw the tail away.
         let (code, msg) = raw.split_once('\n').unwrap_or((raw.as_str(), ""));
         Some((code.parse::<u16>().ok()?, msg.to_string()))
+    }
+}
+
+/// A named secondary cache payload colocated with a provider's main cache.
+/// Unlike [`Cache::write_payload`], writes here do not affect `usage.json`,
+/// `.stale`, or `.last_error`.
+#[derive(Debug, Clone)]
+pub struct DetailCache {
+    dir: PathBuf,
+    name: &'static str,
+}
+
+impl DetailCache {
+    fn payload_path(&self) -> PathBuf {
+        self.dir.join(format!("{}.json", self.name))
+    }
+
+    pub fn lock_path(&self) -> PathBuf {
+        self.dir.join(format!(".{}.lock", self.name))
+    }
+
+    pub fn last_error_path(&self) -> PathBuf {
+        self.dir.join(format!(".{}.last_error", self.name))
+    }
+
+    pub fn payload_age(&self) -> Option<Duration> {
+        let meta = fs::metadata(self.payload_path()).ok()?;
+        let mtime = meta.modified().ok()?;
+        SystemTime::now().duration_since(mtime).ok()
+    }
+
+    pub fn maybe_payload(&self) -> Result<Option<Vec<u8>>> {
+        let path = self.payload_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        fs::read(&path)
+            .map(Some)
+            .map_err(|e| AppError::io_at(path, e))
+    }
+
+    pub fn write_payload(&self, bytes: &[u8]) -> Result<()> {
+        atomic_write(&self.payload_path(), bytes)?;
+        self.clear_last_error();
+        Ok(())
+    }
+
+    pub fn write_last_error(&self, code: u16, msg: &str) {
+        let msg = if matches!(code, 401 | 403) {
+            AUTH_FAILURE_MESSAGE
+        } else {
+            msg
+        };
+        let msg = crate::display::sanitize_untrusted_field(msg);
+        let _ = atomic_write(&self.last_error_path(), format!("{code}\n{msg}").as_bytes());
+    }
+
+    pub fn clear_last_error(&self) {
+        let _ = fs::remove_file(self.last_error_path());
+    }
+
+    pub fn read_last_error(&self) -> Option<(u16, String)> {
+        let raw = fs::read_to_string(self.last_error_path()).ok()?;
+        let (code, message) = raw.split_once('\n').unwrap_or((raw.as_str(), ""));
+        Some((code.parse().ok()?, message.to_string()))
     }
 }
 

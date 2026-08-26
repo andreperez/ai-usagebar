@@ -101,7 +101,7 @@ Define the implementation contract for adding five official usage providers as f
 
 ## 3.6 Complex Requirements
 
-- **REQ-036**: WHEN the Vercel credits fetch succeeds WHERE reporting is enabled and the report cache is expired, the system shall query `/v1/report` with UTC month-to-date bounds grouped by day; IF that report fetch fails with `403` or unsupported-plan indication, THEN the system shall still cache and display the credits payload with a sanitized warning and a six-hour report retry horizon.
+- **REQ-036**: WHEN the Vercel credits fetch succeeds WHERE reporting is enabled and the report cache is expired, the system shall query `/v1/report` with inclusive UTC calendar-date `start_date`/`end_date` bounds and `group_by=day`; IF that report fetch fails with `403`, THEN the system shall still cache and display the credits payload with a sanitized warning and a six-hour report retry horizon.
 - **REQ-037**: WHEN ZenMux is queried WHERE both PAYG and subscription endpoints are reachable, the system shall require at least one valid block (`PAYG.is_some() || subscription.is_some()`); IF both fail, THEN the system shall surface a schema/HTTP error with no stale promotion beyond `MAX_STALE`.
 - **REQ-038**: WHEN Firecrawl is queried WHERE the historical endpoint returns multiple period rows, the system shall select only the unique row whose interval contains the current `billingPeriodStart` (an exact start-date match is preferred); IF none or multiple rows match, THEN the system shall leave period-consumed absent and shall not synthesize it from another period.
 
@@ -451,7 +451,7 @@ the linked official reference remains authoritative if it changes.
 | ZenMux | `GET https://zenmux.ai/api/v1/management/payg/balance` | `Authorization: Bearer <ZENMUX_MANAGEMENT_API_KEY>` | 200 JSON: `success,data:{currency,total_credits,top_up_credits,bonus_credits}` | either block alone suffices; standard keys return management-key diagnostics |
 | ZenMux | `GET https://zenmux.ai/api/v1/management/subscription/detail` | same | 200 JSON: `success,data:{plan,account_status,quota_5_hour,quota_7_day,quota_monthly}` | `usage_percentage` is a 0.0..1.0 fraction; `422` is rate limiting |
 | Vercel | `GET https://ai-gateway.vercel.sh/v1/credits` | `Authorization: Bearer <AI_GATEWAY_API_KEY or OIDC>` | 200 JSON: `balance, total_used` USD | always required |
-| Vercel | `GET https://ai-gateway.vercel.sh/v1/report?from=...&to=...&groupBy=day` | same | 200 JSON: `data:[{day,cost,input_tokens,output_tokens,requests}]` | 403/unsupported → credits retained |
+| Vercel | `GET https://ai-gateway.vercel.sh/v1/report?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&group_by=day` | same | 200 JSON: `results:[{day,total_cost,input_tokens,output_tokens,request_count}]` | 403 → credits retained |
 
 Common transport: `reqwest` with `HTTP_CLIENT_TIMEOUT` 30 s outer, per-request tighter, `read_body_capped` 2 MiB, `same_origin_redirect_policy` (10 hops max, scheme/host/port must match).
 

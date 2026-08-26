@@ -121,6 +121,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "firecrawl" => Some(VendorId::Firecrawl),
         "requesty" => Some(VendorId::Requesty),
         "zenmux" => Some(VendorId::ZenMux),
+        "vercel-ai-gateway" => Some(VendorId::VercelGateway),
         _ => None,
     }
 }

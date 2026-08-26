@@ -855,6 +855,27 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
                     .await?;
             Ok(outcome.into())
         }
+        VendorId::VercelGateway => {
+            let api_key = crate::config::resolve_api_key(
+                "Vercel AI Gateway",
+                &config.vercel_gateway.api_key_env,
+                config.vercel_gateway.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("vercel-ai-gateway")?;
+            Ok(crate::vercel_gateway::fetch_snapshot(
+                client,
+                &api_key,
+                &config.vercel_gateway.api_key_env,
+                &cache,
+                &crate::vercel_gateway::fetch::Endpoints::default(),
+                config.vercel_gateway.report_enabled,
+                std::time::Duration::from_secs(config.vercel_gateway.report_cache_ttl_seconds),
+                DEFAULT_TTL,
+                chrono::Utc::now(),
+            )
+            .await?
+            .into())
+        }
     }
 }
 

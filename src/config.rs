@@ -61,6 +61,8 @@ pub struct Config {
     pub firecrawl: FirecrawlConfig,
     pub requesty: RequestyConfig,
     pub zenmux: ZenMuxConfig,
+    #[serde(rename = "vercel-ai-gateway")]
+    pub vercel_gateway: VercelGatewayConfig,
 }
 
 /// UI / dispatch preferences: active providers control automatic refresh and
@@ -602,6 +604,30 @@ impl Default for ZenMuxConfig {
     }
 }
 
+/// Vercel AI Gateway credits and optional custom reporting.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct VercelGatewayConfig {
+    pub enabled: bool,
+    pub api_key_env: String,
+    pub api_key: Option<String>,
+    /// Custom reporting is billed per query and disabled unless requested.
+    pub report_enabled: bool,
+    pub report_cache_ttl_seconds: u64,
+}
+
+impl Default for VercelGatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "AI_GATEWAY_API_KEY".to_string(),
+            api_key: None,
+            report_enabled: false,
+            report_cache_ttl_seconds: 21_600,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ZaiConfig {
@@ -1092,6 +1118,7 @@ impl Config {
             self.firecrawl.api_key.as_deref(),
             self.requesty.api_key.as_deref(),
             self.zenmux.api_key.as_deref(),
+            self.vercel_gateway.api_key.as_deref(),
         ]
         .into_iter()
         .chain(
@@ -1150,6 +1177,7 @@ impl Config {
             VendorId::Firecrawl => self.firecrawl.enabled,
             VendorId::Requesty => self.requesty.enabled,
             VendorId::ZenMux => self.zenmux.enabled,
+            VendorId::VercelGateway => self.vercel_gateway.enabled,
         }
     }
 
@@ -1219,6 +1247,10 @@ impl Config {
             VendorId::ZenMux => {
                 env_or_inline(&self.zenmux.api_key_env, self.zenmux.api_key.as_deref())
             }
+            VendorId::VercelGateway => env_or_inline(
+                &self.vercel_gateway.api_key_env,
+                self.vercel_gateway.api_key.as_deref(),
+            ),
             // OAuth / local-state vendors (Claude, Codex, Nous, Cursor, Kiro,
             // Antigravity, SuperGrok) resolve their credential at fetch time.
             _ => true,
@@ -1271,6 +1303,11 @@ impl Config {
         if self.context.context_window_tokens == Some(0) {
             return Err(AppError::Other(
                 "[context] context_window_tokens must be greater than zero".into(),
+            ));
+        }
+        if !(300..=86_400).contains(&self.vercel_gateway.report_cache_ttl_seconds) {
+            return Err(AppError::Other(
+                "[vercel-ai-gateway] report_cache_ttl_seconds must be between 300 and 86400".into(),
             ));
         }
         for (model, tokens) in &self.context.model_context_window_tokens {

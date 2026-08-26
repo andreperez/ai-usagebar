@@ -35,7 +35,7 @@ Extend `ai-usagebar` with native Rust support for **Tavily**, **Firecrawl**, **R
 | Firecrawl | `Authorization: Bearer FIRECRAWL_API_KEY` | `GET https://api.firecrawl.dev/v2/team/credit-usage` | `GET /v2/team/credit-usage/historical?byApiKey=false` | **REV**: historical query `byApiKey=false` is required — `true` would scope to one key and undercount team usage. |
 | Requesty | `Authorization: Bearer REQUESTY_API_KEY` (management read) | `GET https://api-v2.requesty.ai/v1/manage/org` | `GET /v1/manage/org/usage?start=<RFC3339>&end=<RFC3339>&resolution=day` | **REV**: omit the optional `group_by` parameter for organization totals; bounds are first-of-month 00:00:00Z to now, built from an injected clock for hermetic tests. |
 | ZenMux | `Authorization: Bearer ZENMUX_MANAGEMENT_API_KEY` (standard inference keys are invalid) | `GET https://zenmux.ai/api/v1/management/payg/balance` | `GET /api/v1/management/subscription/detail` | **REV**: either block may succeed alone; standard-key 401/403 must surface as "management key required" without leaking key material. |
-| Vercel AI Gateway | `Authorization: Bearer AI_GATEWAY_API_KEY` (env-overrideable to OIDC token) | `GET https://ai-gateway.vercel.sh/v1/credits` | Opt-in `GET /v1/report?from=<RFC3339>&to=<RFC3339>&groupBy=day` | **REV**: report is paid/beta, restricted to eligible plans; `403` or "unsupported plan" must not suppress credits. Configurable env var name defaults to `AI_GATEWAY_API_KEY`. |
+| Vercel AI Gateway | `Authorization: Bearer AI_GATEWAY_API_KEY` (env-overrideable to OIDC token) | `GET https://ai-gateway.vercel.sh/v1/credits` | Opt-in `GET /v1/report?start_date=<YYYY-MM-DD>&end_date=<YYYY-MM-DD>&group_by=day` | **REV**: report is beta, billed per query, account-scoped, and restricted to Pro/Enterprise; `403` must not suppress credits. Configurable env var name defaults to `AI_GATEWAY_API_KEY`. |
 
 Official documentation is authoritative. Before implementing each slice, recheck its response schema and authentication notes against the linked API reference; tests must encode only documented fields used by the application.
 
@@ -88,7 +88,7 @@ Official documentation is authoritative. Before implementing each slice, recheck
 
 ### Vercel AI Gateway
 
-- Snapshot: USD balance, lifetime total used, and optional month-to-date report totals for cost, token categories, and requests.
+- Snapshot: USD balance, lifetime total used, and optional month-to-date report totals for charged cost, input/output token categories, and request count.
 - Headline: balance; report values are non-percentage details.
 - Config: `report_enabled = false` and `report_cache_ttl_seconds = 21600`; reject zero or unreasonable values (valid range 300–86400 inclusive) using existing `Config::validate` conventions.
 - Env override: `api_key_env` (default `AI_GATEWAY_API_KEY`) may point to an OIDC token env var; fingerprint must include the resolved env-var name when overridden.
@@ -156,7 +156,7 @@ while the other endpoint's sanitized diagnostic is retained for five minutes.
 
 - Create `src/vercel_gateway/{mod,types,fetch,vendor}.rs` with slug `vercel-ai-gateway` and canonical display name `Vercel AI Gateway` (`vendor_short = vag`).
 - Always refresh credits under normal cache rules (60s TTL). Query the paid report only when `report_enabled == true` and its independent six-hour cache (`usage_report.json`, TTL `report_cache_ttl_seconds`) is expired; do not block credits on report fetch.
-- Aggregate daily report rows with checked arithmetic (cost as `f64` finite, tokens/requests as `u64` checked). Do not confuse lifetime `total_used` with month-to-date report cost.
+- Aggregate daily `results[]` rows with checked arithmetic (`total_cost` as finite `f64`, tokens/`request_count` as `u64` checked). Do not confuse lifetime `total_used` with month-to-date report cost.
 - Config validation: `report_cache_ttl_seconds` ∈ [300, 86400], reject 0/negative/non-finite.
 - Test report disabled (no `/v1/report` call), eligible report success, unsupported-plan partial warning (`403` with plan check), report rate/cost protection (capped TTL prevents tight loop), independent cache TTLs, OIDC env override (`AI_GATEWAY_API_KEY` vs custom), all interfaces, documentation, and ignored live smoke coverage.
 

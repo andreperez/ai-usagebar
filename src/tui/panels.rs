@@ -246,6 +246,13 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
             ),
             (None, None) => ("ZenMux".into(), vec![("—".into(), PaceSeverity::Critical)]),
         },
+        VendorSnapshot::VercelGateway(s) => (
+            "Vercel AI Gateway".into(),
+            vec![(
+                format!("${:.2}", s.balance),
+                crate::vercel_gateway::vendor::severity(s),
+            )],
+        ),
     };
 
     for (text, _) in &mut cells {
@@ -317,6 +324,7 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
                 .utilization_pct
                 .max(subscription.seven_day.window.utilization_pct)
         }),
+        VendorSnapshot::VercelGateway(_) => None,
         VendorSnapshot::Openrouter(_)
         | VendorSnapshot::Deepseek(_)
         | VendorSnapshot::Kilo(_)
@@ -388,6 +396,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::Firecrawl(s) => firecrawl_sections(s, now),
                 VendorSnapshot::Requesty(s) => requesty_sections(s),
                 VendorSnapshot::ZenMux(s) => zenmux_sections(s, now),
+                VendorSnapshot::VercelGateway(s) => vercel_gateway_sections(s),
             };
             // Inject the (already-absolute) fetched-at instant into the title
             // row, right-aligned. Pre-snapshotted in app::refresh_one so it
@@ -1342,6 +1351,38 @@ fn zenmux_sections(s: &crate::usage::ZenMuxSnapshot, now: DateTime<Utc>) -> Sect
         sections.push(Section::Text {
             label: "Top-up / bonus".into(),
             value: format!("${:.2} / ${:.2}", payg.top_up_credits, payg.bonus_credits),
+        });
+    }
+    sections
+}
+
+fn vercel_gateway_sections(s: &crate::usage::VercelGatewaySnapshot) -> SectionBuilder {
+    let mut sections = SectionBuilder::new(vec![
+        Section::Title {
+            left: "Vercel AI Gateway".into(),
+            right: None,
+        },
+        Section::Spacer,
+    ]);
+    sections.push(Section::Text {
+        label: "Balance".into(),
+        value: format!("${:.2}", s.balance),
+    });
+    sections.push(Section::Text {
+        label: "Lifetime used".into(),
+        value: format!("${:.2}", s.total_used),
+    });
+    if let Some(report) = &s.report {
+        sections.push(Section::Text {
+            label: "Month to date".into(),
+            value: format!("${:.2} · {} requests", report.mtd_cost, report.requests),
+        });
+        sections.push(Section::Block {
+            label: "Tokens".into(),
+            body: vec![format!(
+                "input {} · output {}",
+                report.input_tokens, report.output_tokens
+            )],
         });
     }
     sections
