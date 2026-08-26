@@ -269,6 +269,34 @@ impl DetailCache {
         let _ = atomic_write(&self.last_error_path(), format!("{code}\n{msg}").as_bytes());
     }
 
+    /// Persist a diagnostic already normalized by the caller. Detail endpoints
+    /// can use this for non-auth `403` responses such as plan eligibility.
+    pub fn write_safe_last_error(&self, code: u16, msg: &str) {
+        let msg = crate::display::sanitize_untrusted_field(msg);
+        let _ = atomic_write(&self.last_error_path(), format!("{code}\n{msg}").as_bytes());
+    }
+
+    pub fn write_scoped_last_error(&self, target: &str, code: u16, msg: &str) {
+        let message = crate::display::sanitize_untrusted_field(msg);
+        let body = serde_json::json!({"target": target, "code": code, "message": message});
+        let _ = atomic_write(&self.last_error_path(), body.to_string().as_bytes());
+    }
+
+    pub fn read_scoped_last_error(&self, target: &str) -> Option<(u16, String)> {
+        let raw = fs::read_to_string(self.last_error_path()).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        if value.get("target").and_then(serde_json::Value::as_str) != Some(target) {
+            return None;
+        }
+        let code = value
+            .get("code")
+            .and_then(serde_json::Value::as_u64)?
+            .try_into()
+            .ok()?;
+        let message = value.get("message").and_then(serde_json::Value::as_str)?;
+        Some((code, message.to_string()))
+    }
+
     pub fn clear_last_error(&self) {
         let _ = fs::remove_file(self.last_error_path());
     }
@@ -277,6 +305,12 @@ impl DetailCache {
         let raw = fs::read_to_string(self.last_error_path()).ok()?;
         let (code, message) = raw.split_once('\n').unwrap_or((raw.as_str(), ""));
         Some((code.parse().ok()?, message.to_string()))
+    }
+
+    pub fn last_error_age(&self) -> Option<Duration> {
+        let meta = fs::metadata(self.last_error_path()).ok()?;
+        let mtime = meta.modified().ok()?;
+        SystemTime::now().duration_since(mtime).ok()
     }
 }
 
@@ -508,6 +542,25 @@ mod tests {
         let (code, msg) = cache.read_last_error().unwrap();
         assert_eq!(code, 503);
         assert_eq!(msg, "service unavailable");
+    }
+
+    #[test]
+    fn detail_cache_keeps_primary_payload_and_diagnostic_independent() {
+        let (_td, cache) = fixture();
+        cache.write_payload(b"credits").unwrap();
+        let detail = cache.detail("usage_report");
+        detail.write_safe_last_error(403, "plan required");
+        detail.write_payload(b"report").unwrap();
+        assert_eq!(
+            cache.maybe_payload().unwrap().as_deref(),
+            Some(&b"credits"[..])
+        );
+        assert_eq!(
+            detail.maybe_payload().unwrap().as_deref(),
+            Some(&b"report"[..])
+        );
+        assert!(cache.read_last_error().is_none());
+        assert!(detail.read_last_error().is_none());
     }
 
     #[test]

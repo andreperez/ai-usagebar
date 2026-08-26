@@ -17,6 +17,7 @@
 #        | kimi | kilo | novita | moonshot | grok | supergrok | antigravity
 #        | cursor | minimax | kiro | nous | opencode-go | tavily | firecrawl
 #        | requesty | zenmux
+#        | vercel-ai-gateway
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
@@ -336,3 +337,12 @@ api_key_env = "REQUESTY_API_KEY"  # checked first; if set + non-empty, used
 enabled = false
 api_key_env = "ZENMUX_MANAGEMENT_API_KEY"
 # api_key = "..."                 # fallback; chmod 600 the file if you use it
+
+# Vercel AI Gateway — credits are free to query; custom reporting is beta,
+# billed per query, and requires a Pro or Enterprise plan.
+[vercel-ai-gateway]
+enabled = false
+api_key_env = "AI_GATEWAY_API_KEY" # API key or Vercel OIDC token environment variable
+# api_key = "..."                 # fallback; chmod 600 the file if you use it
+report_enabled = false
+report_cache_ttl_seconds = 21600

@@ -159,6 +159,14 @@ enabled = true             # disabled by default; requires a ZenMux Management A
 api_key_env = "ZENMUX_MANAGEMENT_API_KEY"
 # api_key = "..."          # used if ZENMUX_MANAGEMENT_API_KEY is unset; chmod 600 the file!
 # Standard inference keys are rejected. PAYG and subscription endpoints refresh independently.
+
+[vercel-ai-gateway]
+enabled = true             # disabled by default; accepts an AI Gateway key or Vercel OIDC token
+api_key_env = "AI_GATEWAY_API_KEY"
+# api_key = "..."          # used if AI_GATEWAY_API_KEY is unset; chmod 600 the file!
+# Custom reporting is beta, billed per query, and requires Pro or Enterprise.
+report_enabled = false
+report_cache_ttl_seconds = 21600  # 300..86400; separate report-cache TTL
 ```
 
 For more than one OpenRouter key, see the

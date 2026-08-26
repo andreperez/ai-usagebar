@@ -65,7 +65,7 @@ export function markerElapsed(reset, elapsed) {
 // vendor-aware at the native surface so their compatibility aliases cannot
 // turn into confident 0% bars.
 export function hasUsageWindows(vendorShort) {
-    return !['dsk', 'rqy'].includes(field(vendorShort));
+    return !['dsk', 'rqy', 'vag'].includes(field(vendorShort));
 }
 
 function poolChars(model) {

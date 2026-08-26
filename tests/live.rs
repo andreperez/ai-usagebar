@@ -54,6 +54,8 @@
 //!   `SUPERGROK_GROK_BINARY` to the trusted official executable.
 //! - **ZenMux**: uses `ZENMUX_MANAGEMENT_API_KEY` against the documented PAYG
 //!   and subscription management endpoints. Either valid block is sufficient.
+//! - **Vercel AI Gateway**: uses `AI_GATEWAY_API_KEY` (or a configured OIDC
+//!   token env var) against the documented credits endpoint.
 
 use std::time::Duration;
 
@@ -70,6 +72,7 @@ use ai_usagebar::openrouter;
 use ai_usagebar::requesty;
 use ai_usagebar::supergrok;
 use ai_usagebar::tavily;
+use ai_usagebar::vercel_gateway;
 use ai_usagebar::zai;
 use ai_usagebar::zenmux;
 
@@ -528,6 +531,44 @@ async fn zenmux_live() {
         out.snapshot.payg.is_some(),
         out.snapshot.subscription.is_some()
     );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn vercel_gateway_live() {
+    let Ok(api_key) = std::env::var("AI_GATEWAY_API_KEY") else {
+        eprintln!(
+            "vercel_gateway_live: AI_GATEWAY_API_KEY is unset — skipping optional Vercel smoke test"
+        );
+        return;
+    };
+    if api_key.trim().is_empty() {
+        eprintln!(
+            "vercel_gateway_live: AI_GATEWAY_API_KEY is empty — skipping optional Vercel smoke test"
+        );
+        return;
+    }
+    let cache = xdg_cache_for("vercel-ai-gateway");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let out = vercel_gateway::fetch_snapshot(
+        &client,
+        &api_key,
+        "AI_GATEWAY_API_KEY",
+        &cache,
+        &vercel_gateway::fetch::Endpoints::default(),
+        false,
+        Duration::from_secs(21_600),
+        Duration::ZERO,
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("Vercel credits fetch should succeed against the real API");
+    assert!(out.snapshot.balance.is_finite() && out.snapshot.balance >= 0.0);
+    assert!(out.snapshot.total_used.is_finite() && out.snapshot.total_used >= 0.0);
+    println!("vercel-ai-gateway — credits available");
 }
 
 #[tokio::test]

@@ -147,6 +147,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         section: "zenmux",
         note: "management key — PAYG + subscription",
     },
+    KeyVendor {
+        id: VendorId::VercelGateway,
+        label: "Vercel AI Gateway",
+        env: "AI_GATEWAY_API_KEY",
+        section: "vercel-ai-gateway",
+        note: "API key or Vercel OIDC token",
+    },
 ];
 
 /// Read the inline `api_key` currently in config for a given section, so the
@@ -168,6 +175,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "firecrawl" => cfg.firecrawl.api_key.as_deref(),
         "requesty" => cfg.requesty.api_key.as_deref(),
         "zenmux" => cfg.zenmux.api_key.as_deref(),
+        "vercel-ai-gateway" => cfg.vercel_gateway.api_key.as_deref(),
         _ => None,
     }
 }
@@ -1004,6 +1012,7 @@ fn configured_key_env<'a>(cfg: &'a Config, section: &str, fallback: &'a str) -> 
         "firecrawl" => &cfg.firecrawl.api_key_env,
         "requesty" => &cfg.requesty.api_key_env,
         "zenmux" => &cfg.zenmux.api_key_env,
+        "vercel-ai-gateway" => &cfg.vercel_gateway.api_key_env,
         _ => fallback,
     }
 }
@@ -1665,6 +1674,25 @@ mod tests {
         let state = SettingsState::from_config(&cfg);
         assert_eq!(state.keys[key_index(VendorId::ZenMux)].buf, "zmx-inline");
         assert!(state.configured[key_index(VendorId::ZenMux)]);
+    }
+
+    #[test]
+    fn vercel_gateway_key_vendor_supports_api_keys_and_oidc_tokens() {
+        let kv = KEY_VENDORS
+            .iter()
+            .find(|kv| kv.id == VendorId::VercelGateway)
+            .unwrap();
+        assert_eq!(kv.label, "Vercel AI Gateway");
+        assert_eq!(kv.env, "AI_GATEWAY_API_KEY");
+        assert_eq!(kv.section, "vercel-ai-gateway");
+        let mut cfg = Config::default();
+        cfg.vercel_gateway.api_key = Some("vag-inline".into());
+        let state = SettingsState::from_config(&cfg);
+        assert_eq!(
+            state.keys[key_index(VendorId::VercelGateway)].buf,
+            "vag-inline"
+        );
+        assert!(state.configured[key_index(VendorId::VercelGateway)]);
     }
 
     #[test]

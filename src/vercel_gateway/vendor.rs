@@ -3,7 +3,7 @@
 use super::fetch::FetchOutcome;
 use crate::format::{placeholders, substitute, updated_at_hm};
 use crate::pacing::PaceSeverity;
-use crate::pango::{color_span, severity_color};
+use crate::pango::{color_span, escape, severity_color};
 use crate::theme::Theme;
 use crate::tooltip::{Line as TooltipLine, render_bordered};
 use crate::usage::VercelGatewaySnapshot;
@@ -131,7 +131,11 @@ fn tooltip(
     }
     if let Some((code, message)) = &outcome.last_error {
         lines.push(TooltipLine::Sep);
-        lines.push(TooltipLine::Body(format!(" Warning {} {}", code, message)));
+        lines.push(TooltipLine::Body(format!(
+            " Warning {} {}",
+            code,
+            escape(message)
+        )));
     }
     lines.push(TooltipLine::Sep);
     lines.push(TooltipLine::Body(format!(

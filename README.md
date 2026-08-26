@@ -148,6 +148,7 @@ come from environment variables or `config.toml`.
 | Firecrawl | API key (`FIRECRAWL_API_KEY` env or `[firecrawl] api_key` in config) | Set either and opt in. Reports remaining credits, plan credits, matching billing-period usage, and the billing-period reset. Historical detail is optional. |
 | Requesty | API key (`REQUESTY_API_KEY` env or `[requesty] api_key` in config) | Set either and opt in. Reports organization balance and, when the management key permits it, month-to-date spend, request, and token totals. |
 | ZenMux | Management API key (`ZENMUX_MANAGEMENT_API_KEY` env or `[zenmux] api_key` in config) | Set either and opt in. Standard inference keys do not work. Reports PAYG balance and subscription 5h/7d quotas when each endpoint is available. |
+| Vercel AI Gateway | API key or OIDC token (`AI_GATEWAY_API_KEY` env or `[vercel-ai-gateway] api_key` in config) | Set either and opt in. Reports credits and lifetime spend. Optional custom reporting is beta, billed per query, and requires a Pro or Enterprise plan. |
 
 ### Nous credits and OpenCode Go
 
@@ -351,7 +352,7 @@ privileges, and does not overwrite user configuration.
 
 | Integration | Supported providers | Notes |
 |---|---|---|
-| [macOS menu bar](macos/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok (xAI), Anthropic API, Cursor, Google Antigravity, Tavily, Firecrawl, Requesty, ZenMux | Seventeen providers. |
+| [macOS menu bar](macos/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok (xAI), Anthropic API, Cursor, Google Antigravity, Tavily, Firecrawl, Requesty, ZenMux, Vercel AI Gateway | Eighteen providers. |
 | [GNOME Shell](gnome-extension/README.md) | Claude, Codex, Z.AI, OpenRouter, DeepSeek, Google Antigravity | Antigravity's two quota pools appear as grouped rows. |
 | [KDE Plasma 6](kde-plasmoid/README.md) | Whatever `usage --json` reports | Provider tabs in the popup; vendor is per applet instance. |
 

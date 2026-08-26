@@ -1,5 +1,7 @@
 //! Wire types for Vercel AI Gateway's documented REST endpoints.
 
+use std::collections::HashSet;
+
 use serde::Deserialize;
 
 use crate::error::{AppError, Result};
@@ -52,6 +54,9 @@ impl ReportResponse {
                 "Vercel report interval end precedes its start".into(),
             ));
         }
+        let start_day = interval_start.date_naive();
+        let end_day = interval_end.date_naive();
+        let mut days = HashSet::new();
         self.results.into_iter().try_fold(
             VercelReport {
                 mtd_cost: 0.0,
@@ -62,8 +67,17 @@ impl ReportResponse {
                 interval_end,
             },
             |mut total, row| {
-                if chrono::NaiveDate::parse_from_str(&row.day, "%Y-%m-%d").is_err() {
-                    return Err(AppError::Schema("Vercel report row has invalid day".into()));
+                let day = chrono::NaiveDate::parse_from_str(&row.day, "%Y-%m-%d")
+                    .map_err(|_| AppError::Schema("Vercel report row has invalid day".into()))?;
+                if day < start_day || day > end_day {
+                    return Err(AppError::Schema(
+                        "Vercel report row falls outside requested interval".into(),
+                    ));
+                }
+                if !days.insert(day) {
+                    return Err(AppError::Schema(
+                        "Vercel report contains duplicate day rows".into(),
+                    ));
                 }
                 total.mtd_cost = finite_amount(
                     "Vercel report",
@@ -151,5 +165,25 @@ mod tests {
         assert_eq!(report.input_tokens, 300);
         assert_eq!(report.output_tokens, 60);
         assert_eq!(report.requests, 5);
+    }
+
+    #[test]
+    fn report_rejects_duplicate_or_out_of_range_days() {
+        let start = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
+        let end = chrono::Utc
+            .with_ymd_and_hms(2026, 8, 2, 23, 59, 59)
+            .unwrap();
+        let duplicate = r#"{"results":[{"day":"2026-08-01","total_cost":1,"input_tokens":1,"output_tokens":1,"request_count":1},{"day":"2026-08-01","total_cost":1,"input_tokens":1,"output_tokens":1,"request_count":1}]}"#;
+        let error = serde_json::from_str::<ReportResponse>(duplicate)
+            .unwrap()
+            .into_report(start, end)
+            .unwrap_err();
+        assert!(error.to_string().contains("duplicate"));
+        let outside = r#"{"results":[{"day":"2026-07-31","total_cost":1,"input_tokens":1,"output_tokens":1,"request_count":1}]}"#;
+        let error = serde_json::from_str::<ReportResponse>(outside)
+            .unwrap()
+            .into_report(start, end)
+            .unwrap_err();
+        assert!(error.to_string().contains("outside"));
     }
 }

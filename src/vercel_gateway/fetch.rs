@@ -40,6 +40,7 @@ pub struct FetchOutcome {
     pub cache_age: Option<Duration>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
     api_key: &str,
@@ -78,7 +79,8 @@ pub async fn fetch_snapshot(
         .await
         {
             Ok(report) => snapshot.report = Some(report),
-            Err(error) => last_error = Some(error_to_pair(&error)),
+            Err(error) if last_error.is_none() => last_error = Some(error_to_pair(&error)),
+            Err(_) => {}
         }
     }
     Ok(FetchOutcome {
@@ -116,7 +118,7 @@ async fn fetch_credits_cached(
             cache_age: cache.payload_age(),
         });
     }
-    match fetch_json::<CreditsResponse>(client, url, api_key, &[]).await {
+    match fetch_json::<CreditsResponse>(client, url, api_key, &[], false).await {
         Ok(response) => {
             let snapshot = response.into_snapshot(target.to_string())?;
             let body = serde_json::to_vec(
@@ -155,12 +157,17 @@ async fn fetch_report_cached(
     {
         return Ok(report);
     }
+    if detail.last_error_age().is_some_and(|age| age < ttl)
+        && let Some((status, message)) = detail.read_scoped_last_error(target)
+    {
+        return Err(cached_report_error(status, message));
+    }
     let query = [
         ("start_date", start.format("%Y-%m-%d").to_string()),
         ("end_date", end.format("%Y-%m-%d").to_string()),
         ("group_by", "day".into()),
     ];
-    match fetch_json::<ReportResponse>(client, url, api_key, &query).await {
+    match fetch_json::<ReportResponse>(client, url, api_key, &query, true).await {
         Ok(response) => {
             let report = response.into_report(start, now)?;
             let body = serde_json::to_vec(
@@ -169,10 +176,22 @@ async fn fetch_report_cached(
             detail.write_payload(&body)?;
             Ok(report)
         }
-        Err(error) => {
+        Err(error) if matches!(error, AppError::Http { status: 403, .. }) => {
             let pair = error_to_pair(&error);
-            detail.write_last_error(pair.0, &pair.1);
+            detail.write_scoped_last_error(target, pair.0, &pair.1);
             Err(error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn cached_report_error(status: u16, message: String) -> AppError {
+    if status == 0 {
+        AppError::Schema(message)
+    } else {
+        AppError::Http {
+            status,
+            body: message,
         }
     }
 }
@@ -265,6 +284,7 @@ async fn fetch_json<T: DeserializeOwned>(
     url: &str,
     api_key: &str,
     query: &[(&str, String)],
+    is_report: bool,
 ) -> Result<T> {
     let response = tokio::time::timeout(
         HTTP_TIMEOUT,
@@ -284,7 +304,10 @@ async fn fetch_json<T: DeserializeOwned>(
             status: status.as_u16(),
             body: match status.as_u16() {
                 401 => "Vercel AI Gateway authentication failed".into(),
-                403 => "Vercel AI Gateway report requires a Pro or Enterprise plan".into(),
+                403 if is_report => {
+                    "Vercel AI Gateway report requires a Pro or Enterprise plan".into()
+                }
+                403 => "Vercel AI Gateway authorization failed".into(),
                 code => format!("Vercel AI Gateway API returned HTTP {code}"),
             },
         });
@@ -310,4 +333,160 @@ fn target_key(endpoints: &Endpoints, api_key: &str, env: &str) -> String {
         "{}|{}|env:{env}|key:{hex}",
         endpoints.credits, endpoints.report
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use tempfile::TempDir;
+
+    fn cache_fixture() -> (TempDir, Cache) {
+        let dir = TempDir::new().unwrap();
+        let cache = Cache::at(dir.path().join("vercel-ai-gateway"));
+        cache.ensure_dir().unwrap();
+        (dir, cache)
+    }
+
+    fn endpoints(server: &mockito::ServerGuard) -> Endpoints {
+        Endpoints {
+            credits: format!("{}/v1/credits", server.url()),
+            report: format!("{}/v1/report", server.url()),
+        }
+    }
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 8, 25, 12, 0, 0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn report_disabled_never_calls_report_endpoint() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/v1/credits")
+            .match_header("authorization", "Bearer vag-test")
+            .with_status(200)
+            .with_body(r#"{"balance":"95.50","total_used":"4.50"}"#)
+            .create_async()
+            .await;
+        let (_dir, cache) = cache_fixture();
+        let out = fetch_snapshot(
+            &reqwest::Client::new(),
+            "vag-test",
+            "AI_GATEWAY_API_KEY",
+            &cache,
+            &endpoints(&server),
+            false,
+            Duration::from_secs(21_600),
+            Duration::ZERO,
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.snapshot.balance, 95.5);
+        assert!(out.snapshot.report.is_none());
+    }
+
+    #[tokio::test]
+    async fn report_success_aggregates_results_with_calendar_bounds() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/v1/credits")
+            .with_status(200)
+            .with_body(r#"{"balance":"95.50","total_used":"4.50"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/v1/report")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("start_date".into(), "2026-08-01".into()),
+                mockito::Matcher::UrlEncoded("end_date".into(), "2026-08-25".into()),
+                mockito::Matcher::UrlEncoded("group_by".into(), "day".into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"results":[{"day":"2026-08-01","total_cost":1.25,"input_tokens":100,"output_tokens":20,"request_count":2}]}"#)
+            .create_async()
+            .await;
+        let (_dir, cache) = cache_fixture();
+        let out = fetch_snapshot(
+            &reqwest::Client::new(),
+            "vag-test",
+            "AI_GATEWAY_API_KEY",
+            &cache,
+            &endpoints(&server),
+            true,
+            Duration::from_secs(21_600),
+            Duration::ZERO,
+            now(),
+        )
+        .await
+        .unwrap();
+        let report = out.snapshot.report.unwrap();
+        assert_eq!(report.mtd_cost, 1.25);
+        assert_eq!(report.requests, 2);
+        assert!(out.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn report_forbidden_keeps_live_credits_and_caches_diagnostic() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/v1/credits")
+            .with_status(200)
+            .with_body(r#"{"balance":"95.50","total_used":"4.50"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/v1/report")
+            .match_query(mockito::Matcher::Any)
+            .with_status(403)
+            .with_body(r#"{"error":{"message":"account identifier"}}"#)
+            .create_async()
+            .await;
+        let (_dir, cache) = cache_fixture();
+        let out = fetch_snapshot(
+            &reqwest::Client::new(),
+            "vag-test",
+            "AI_GATEWAY_API_KEY",
+            &cache,
+            &endpoints(&server),
+            true,
+            Duration::from_secs(21_600),
+            Duration::ZERO,
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.snapshot.balance, 95.5);
+        assert!(out.snapshot.report.is_none());
+        assert_eq!(
+            out.last_error,
+            Some((
+                403,
+                "Vercel AI Gateway report requires a Pro or Enterprise plan".into()
+            ))
+        );
+        let target = target_key(&endpoints(&server), "vag-test", "AI_GATEWAY_API_KEY");
+        assert_eq!(
+            cache
+                .detail("usage_report")
+                .read_scoped_last_error(&target)
+                .unwrap()
+                .0,
+            403
+        );
+    }
+
+    #[test]
+    fn env_name_and_key_rotation_change_scope_fingerprint() {
+        let endpoints = Endpoints::default();
+        assert_ne!(
+            target_key(&endpoints, "key-a", "AI_GATEWAY_API_KEY"),
+            target_key(&endpoints, "key-a", "VERCEL_OIDC_TOKEN")
+        );
+        assert_ne!(
+            target_key(&endpoints, "key-a", "AI_GATEWAY_API_KEY"),
+            target_key(&endpoints, "key-b", "AI_GATEWAY_API_KEY")
+        );
+    }
 }

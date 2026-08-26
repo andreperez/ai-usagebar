@@ -38,6 +38,8 @@ Each release is also published at
 - ZenMux PAYG balance and subscription management quotas. PAYG and subscription
   blocks refresh independently, so either valid block remains visible with a
   sanitized diagnostic when the other endpoint fails.
+- Vercel AI Gateway credits, lifetime spend, and optional month-to-date Custom
+  Reporting totals with an independently cached, opt-in reporting query.
 
 ## [1.4.0] — 2026-08-21
 

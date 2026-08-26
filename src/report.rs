@@ -798,6 +798,43 @@ mod tests {
     }
 
     #[test]
+    fn vercel_json_keeps_credits_and_report_as_non_percentage_sections() {
+        use crate::usage::{VercelGatewaySnapshot, VercelReport};
+
+        let state = TabState::Ready(Box::new(ReadyTab {
+            snapshot: VendorSnapshot::VercelGateway(VercelGatewaySnapshot {
+                balance: 95.5,
+                total_used: 4.5,
+                report: Some(VercelReport {
+                    mtd_cost: 1.25,
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    requests: 2,
+                    interval_start: "2026-08-01T00:00:00Z".parse().unwrap(),
+                    interval_end: "2026-08-25T12:00:00Z".parse().unwrap(),
+                }),
+                scope_fingerprint: String::new(),
+            }),
+            stale: false,
+            last_error: None,
+            fetched_at: None,
+        }));
+        let projected =
+            entry_from_state(&TabId::vendor(VendorId::VercelGateway), &state, Utc::now());
+        let rendered = render_json_for_primary(&[projected], None);
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        let entry = &value["entries"][0];
+        assert_eq!(entry["id"], "vercel-ai-gateway");
+        assert_eq!(entry["display_name"], "Vercel AI Gateway");
+        assert!(entry["metrics"].as_array().unwrap().is_empty());
+        assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
+            section["type"] == "text"
+                && section["label"] == "Month to date"
+                && section["value"] == "$1.25 · 2 requests"
+        }));
+    }
+
+    #[test]
     fn failed_entries_do_not_duplicate_tui_retry_rows() {
         let failed = entry_from_state(
             &TabId::vendor(VendorId::Openai),

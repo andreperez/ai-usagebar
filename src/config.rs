@@ -1666,6 +1666,30 @@ mod tests {
     }
 
     #[test]
+    fn vercel_gateway_defaults_are_opt_in_and_ttl_is_bounded() {
+        let mut config = Config::default();
+        assert!(!config.is_enabled(VendorId::VercelGateway));
+        assert_eq!(config.vercel_gateway.api_key_env, "AI_GATEWAY_API_KEY");
+        assert_eq!(config.vercel_gateway.report_cache_ttl_seconds, 21_600);
+        config.vercel_gateway.report_cache_ttl_seconds = 299;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("300 and 86400")
+        );
+        config.vercel_gateway.report_cache_ttl_seconds = 86_401;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("300 and 86400")
+        );
+    }
+
+    #[test]
     fn is_configured_counts_openrouter_named_account_keys() {
         let mut config = Config::default();
         config.openrouter.api_key_env = "OR_TEST_UNSET_ENV".into();

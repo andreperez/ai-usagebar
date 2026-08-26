@@ -152,7 +152,7 @@ available here; the release TUI executable remains locked by a running process.
 `quota_7_day`, and `quota_monthly`. Either valid block is cached and displayed
 while the other endpoint's sanitized diagnostic is retained for five minutes.
 
-### 6. Vercel AI Gateway Vertical Slice
+### 6. Vercel AI Gateway Vertical Slice  ✅
 
 - Create `src/vercel_gateway/{mod,types,fetch,vendor}.rs` with slug `vercel-ai-gateway` and canonical display name `Vercel AI Gateway` (`vendor_short = vag`).
 - Always refresh credits under normal cache rules (60s TTL). Query the paid report only when `report_enabled == true` and its independent six-hour cache (`usage_report.json`, TTL `report_cache_ttl_seconds`) is expired; do not block credits on report fetch.

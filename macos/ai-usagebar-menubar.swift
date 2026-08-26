@@ -81,7 +81,8 @@ let POINT_CRITICAL_MIN = 10
 // populated — and the `aapi_*` fields (23-26) carry the Anthropic API headline
 // plus its spend-vs-limit bar. `cursor_total_pct` (27) is followed by the
 // Antigravity-only fourth-window fields (28-30), followed by Requesty's
-// balance at 31 and ZenMux's PAYG balance at 32. A final literal sentinel
+// balance at 31, ZenMux's PAYG balance at 32, and Vercel AI Gateway's credit
+// balance at 33. A final literal sentinel
 // absorbs the widget's stale suffix, preserving these fields.
 let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_reset};;" +
              "{sonnet_pct};;{sonnet_reset};;{extra_pct};;{extra_spent};;{extra_limit};;" +
@@ -89,7 +90,7 @@ let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_rese
              "{session_elapsed};;{weekly_elapsed};;{scoped_elapsed};;{vendor_short};;{or_balance};;" +
              "{ds_balance};;{kilo_balance};;{nv_balance};;{km_balance};;{grok_balance};;" +
              "{aapi_headline};;{aapi_pct};;{aapi_spent};;{aapi_limit};;{cursor_total_pct};;" +
-              "{extra_model};;{extra_reset};;{extra_elapsed};;{rqy_balance};;{zmx_payg}"
+              "{extra_model};;{extra_reset};;{extra_elapsed};;{rqy_balance};;{zmx_payg};;{vag_balance}"
 
 let FORMAT_WITH_SENTINEL = FORMAT + ";;__aiub_end__"
 
@@ -455,6 +456,7 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
     case "anthropic_api": balanceFieldIndex = 23
     case "requesty": balanceFieldIndex = 31
     case "zenmux": balanceFieldIndex = 32
+    case "vercel-ai-gateway": balanceFieldIndex = 33
     default: balanceFieldIndex = nil
     }
     let balance = balanceFieldIndex.flatMap {
@@ -555,6 +557,7 @@ let VENDOR_AUTH: [VendorAuth] = [
     VendorAuth(id: "firecrawl", name: "Firecrawl", kind: "apikey", cli: "", login: "", pkg: "", env: "FIRECRAWL_API_KEY"),
     VendorAuth(id: "requesty", name: "Requesty", kind: "apikey", cli: "", login: "", pkg: "", env: "REQUESTY_API_KEY"),
     VendorAuth(id: "zenmux", name: "ZenMux", kind: "apikey", cli: "", login: "", pkg: "", env: "ZENMUX_MANAGEMENT_API_KEY"),
+    VendorAuth(id: "vercel-ai-gateway", name: "Vercel AI Gateway", kind: "apikey", cli: "", login: "", pkg: "", env: "AI_GATEWAY_API_KEY"),
     // Cursor has no API key: the binary reads the session token the Cursor IDE
     // wrote to its own state.vscdb. `kind: "local"` marks the "configured =
     // signed in to the app" case (like Antigravity below), with no login CLI
@@ -1115,7 +1118,7 @@ func addAccountScript(binary: String, label: String, desktop: Bool) -> String {
 func defaultEnabled(_ id: String) -> Bool {
     switch id {
     case "anthropic", "openai", "zai", "openrouter": return true
-    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux": return false
+    case "deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux", "vercel-ai-gateway": return false
     default: return true
     }
 }

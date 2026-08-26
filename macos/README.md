@@ -15,7 +15,7 @@ A single Swift file (`NSStatusItem` + `NSAttributedString`); no Xcode project.
 
 ## Vendor scope
 
-The selector supports **seventeen vendors** that ship in the binary:
+The selector supports **eighteen vendors** that ship in the binary:
 
 - **Rate-limit windows (5h / weekly):** Claude, Codex,
   Z.AI (GLM), and Google Antigravity (two independent pools — Gemini, and
@@ -26,14 +26,14 @@ The selector supports **seventeen vendors** that ship in the binary:
   billing-period usage), and ZenMux (subscription 5h/7d quotas plus PAYG
   balance when available).
 - **Balance-only:** OpenRouter, DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok
-  (xAI), Anthropic API, and Requesty. These have no 5h/weekly quota windows,
+  (xAI), Anthropic API, Requesty, and Vercel AI Gateway. These have no 5h/weekly quota windows,
   so the app shows their balance/credits in the header (`cr <amount>`) and
   suppresses the session/weekly rows. Anthropic API additionally renders a
   spend-vs-limit bar when a monthly limit is configured.
 
 Only **enabled** vendors appear in the selector. The opt-in vendors (DeepSeek,
 Kimi, Kilo, Novita, Moonshot, Grok, Anthropic API, Cursor, Antigravity, Tavily,
-Firecrawl, Requesty, and ZenMux) default to disabled in the Rust config, matching
+Firecrawl, Requesty, ZenMux, and Vercel AI Gateway) default to disabled in the Rust config, matching
 `src/config.rs`; set
 `[vendor].enabled = true` (or save an API key via the TUI) to turn one on.
 

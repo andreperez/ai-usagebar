@@ -22,6 +22,7 @@ assert.equal(plainTextFromPango('&amp;lt;literal&amp;gt;'), '&lt;literal&gt;');
 assert.equal(hasUsageWindows('dsk'), false);
 assert.equal(hasUsageWindows('rqy'), false);
 assert.equal(hasUsageWindows('zmx'), true);
+assert.equal(hasUsageWindows('vag'), false);
 assert.equal(hasUsageWindows('gpt'), true);
 assert.equal(hasUsageWindows('agy'), true);
 assert.equal(hasUsageWindows('{vendor_short}'), true); // older binary compatibility

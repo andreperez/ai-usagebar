@@ -19,6 +19,7 @@ metrics expand to an empty string unless noted otherwise.
 | MiniMax | `mmx` | Kiro CLI | `kir` |
 | Tavily | `tav` | Firecrawl | `fcw` |
 | Requesty | `rqy` | ZenMux | `zmx` |
+| Vercel AI Gateway | `vag` | | |
 
 Use `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and `{weekly_reset}`
 when one format must work across providers. Providers without matching time
@@ -277,3 +278,19 @@ quota data from the Management API.
   windows in desktop adapters.
 - `{zmx_status}` preserves documented account status; an unknown status is
   shown as received and is never treated as healthy.
+
+## Vercel AI Gateway
+
+`{vag_balance}`, `{vag_used}`, `{vag_mtd}`, `{vag_requests}`, `{vag_input}`,
+and `{vag_output}` report AI Gateway credits, lifetime spend, and optional
+month-to-date Custom Reporting totals.
+
+- `{vag_balance}` is the current USD credit balance and `{vag_used}` is
+  lifetime spend; they are distinct values.
+- `{vag_mtd}`, `{vag_requests}`, `{vag_input}`, and `{vag_output}` are `—`
+  unless `[vercel-ai-gateway] report_enabled = true` and a report is available.
+- The report intentionally omits `api_key_id`, so its totals are account/team
+  wide, matching the credit balance scope rather than a single API key.
+- Vercel has no usage quota denominator, so generic session/weekly percentage
+  aliases remain empty and `usage --json` emits text and block sections rather
+  than fabricated metrics.

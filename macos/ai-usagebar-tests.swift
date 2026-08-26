@@ -198,7 +198,7 @@ func testDefaultEnabled() {
     for id in ["anthropic", "openai", "zai", "openrouter"] {
         assertEqual(defaultEnabled(id), true, "\(id) defaults enabled")
     }
-    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux"] {
+    for id in ["deepseek", "kimi", "kilo", "novita", "moonshot", "grok", "anthropic_api", "cursor", "antigravity", "tavily", "firecrawl", "requesty", "zenmux", "vercel-ai-gateway"] {
         assertEqual(defaultEnabled(id), false, "\(id) defaults disabled (opt-in)")
     }
 }
@@ -278,6 +278,12 @@ func testParserBalances() {
                                        fields: fields(through: 32, set: [1: "84", 2: "1h", 3: "42", 4: "2d", 32: "—"]))
     assertNil(zmxSubscriptionOnly?.creditBalance, "zenmux omits unavailable PAYG balance")
     assertEqual(zmxSubscriptionOnly?.hasUsageWindows, true, "zenmux keeps subscription windows without PAYG")
+
+    // Vercel AI Gateway: credit balance at 33 with no quota windows.
+    let vag = snapshot(FORMAT, vendor: "vercel-ai-gateway",
+                       fields: fields(through: 33, set: [33: "$95.50"]))
+    assertEqual(vag?.creditBalance, "$95.50", "vercel credit balance value")
+    assertEqual(vag?.hasUsageWindows, false, "vercel suppresses 5h/7d windows")
 
     // Anthropic API with a monthly limit → spend-vs-limit bar, no duplicate
     // session/weekly, and no headline balance (the bar replaces it).
