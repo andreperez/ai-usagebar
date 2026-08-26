@@ -197,7 +197,10 @@ installs are unaffected until you opt in. Use either method:
   `ai-usagebar-tui` and press `s`. Saving a non-empty API key sets that vendor's
   `enabled = true` for you. Clearing it removes the inline key from
   `config.toml`.
-- Add `enabled = true` to the vendor's config section alongside the key.
+- In the Settings overlay, select a provider under **Dashboard providers** and
+  save. Providers with a configured environment variable can be enabled there
+  without storing the key in `config.toml`; saving also creates missing provider
+  sections with their default values.
 
 The primary-vendor selector only offers vendors that are currently enabled, so a
 vendor you haven't opted into cannot be set as primary.

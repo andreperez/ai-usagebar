@@ -5,6 +5,14 @@ Claude, Codex, Z.AI, and OpenRouter are enabled by default; other providers are
 opt-in. The commented example shows the defaults and provider-specific
 settings.
 
+Open the terminal interface (TUI) Settings overlay with `s` to manage provider
+activation visually. Saving Settings adds every missing provider section with
+its default values while preserving existing comments, values, and inline keys.
+Select a provider under **Dashboard providers** to set `enabled = true` and add
+it to `[ui].active_vendors`. An API-key provider whose environment variable is
+already configured can be enabled this way without copying its key into the
+file.
+
 ```toml
 [ui]
 # Explicit automatic fetch/display scope. When set, only these configured,

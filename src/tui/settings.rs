@@ -314,7 +314,9 @@ pub struct SettingsState {
     /// outside the automatic fetch/display scope.
     pub primary_choices: Vec<VendorId>,
     pub primary: VendorId,
-    /// Configured, enabled providers eligible for automatic refresh/display.
+    /// Configured providers eligible for visual activation. API-key providers
+    /// with an environment key remain selectable before their config section is
+    /// enabled, so Settings can complete activation without manual TOML edits.
     pub active_choices: Vec<VendorId>,
     /// Explicit selected subset, stored as `[ui] active_vendors` on save.
     pub active_vendors: Vec<VendorId>,
@@ -346,12 +348,21 @@ impl SettingsState {
                     || config_inline_key(cfg, kv.section).is_some_and(|k| !k.is_empty())
             })
             .collect();
-        let active_choices: Vec<VendorId> = cfg
-            .enabled_vendors()
-            .into_iter()
+        let active_choices: Vec<VendorId> = VendorId::all()
+            .iter()
+            .copied()
             .filter(|vendor| cfg.is_configured(*vendor))
             .collect();
-        let active_vendors = cfg.active_vendors();
+        let selected = cfg
+            .ui
+            .active_vendors
+            .clone()
+            .unwrap_or_else(|| cfg.active_vendors());
+        let active_vendors: Vec<VendorId> = active_choices
+            .iter()
+            .copied()
+            .filter(|vendor| selected.contains(vendor))
+            .collect();
         let primary_choices = active_vendors.clone();
         // A primary outside the active scope is ineffective. Display the first
         // active provider instead; when none are active retain the historical
@@ -718,6 +729,7 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
             AppError::Other(format!("config.toml not parseable: {e}"))
         })?
     };
+    materialize_missing_default_sections(&mut doc)?;
 
     let mut active_vendors = state.active_vendors.clone();
 
@@ -745,6 +757,9 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
         .copied()
         .filter(|id| active_vendors.contains(id))
         .collect();
+    for vendor in &active_vendors {
+        set_bool(&mut doc, vendor_config_section(*vendor), "enabled", true)?;
+    }
     set_vendor_list(&mut doc, "ui", "active_vendors", &active_vendors)?;
     if active_vendors.contains(&state.primary) {
         set_string(&mut doc, "ui", "primary", state.primary.slug())?;
@@ -765,6 +780,52 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Add every currently known default section once Settings owns a config save.
+/// Existing tables and their comments remain untouched; only absent sections
+/// are copied from the serialized defaults. This keeps newly added providers
+/// discoverable in the user's config without overwriting choices or keys.
+fn materialize_missing_default_sections(doc: &mut DocumentMut) -> Result<()> {
+    let defaults = toml::to_string(&Config::default()).map_err(|error| {
+        AppError::Other(format!("default config could not be serialized: {error}"))
+    })?;
+    let defaults = defaults.parse::<DocumentMut>().map_err(|error| {
+        AppError::Other(format!("default config could not be materialized: {error}"))
+    })?;
+    for (key, item) in defaults.as_table().iter() {
+        if !doc.as_table().contains_key(key) {
+            doc.as_table_mut().insert(key, item.clone());
+        }
+    }
+    Ok(())
+}
+
+fn vendor_config_section(vendor: VendorId) -> &'static str {
+    match vendor {
+        VendorId::Anthropic => "anthropic",
+        VendorId::AnthropicApi => "anthropic_api",
+        VendorId::Openai => "openai",
+        VendorId::Zai => "zai",
+        VendorId::Openrouter => "openrouter",
+        VendorId::Deepseek => "deepseek",
+        VendorId::Kimi => "kimi",
+        VendorId::Kilo => "kilo",
+        VendorId::Novita => "novita",
+        VendorId::Moonshot => "moonshot",
+        VendorId::Grok => "grok",
+        VendorId::Supergrok => "supergrok",
+        VendorId::Antigravity => "antigravity",
+        VendorId::Cursor => "cursor",
+        VendorId::Minimax => "minimax",
+        VendorId::Kiro => "kiro",
+        VendorId::NousResearch => "nous",
+        VendorId::OpenCodeGo => "opencode-go",
+        VendorId::Tavily => "tavily",
+        VendorId::Firecrawl => "firecrawl",
+        VendorId::Requesty => "requesty",
+        VendorId::ZenMux => "zenmux",
+    }
 }
 
 /// Apply one key field to the document. Untouched fields are left alone; a
@@ -1785,6 +1846,45 @@ mod tests {
     }
 
     #[test]
+    fn save_materializes_all_provider_sections_without_enabling_opt_ins() {
+        let (_dir, path) = temp_config(Some("[ui]\nprimary = \"anthropic\"\n"));
+        let state = SettingsState::from_config(&Config::default());
+        save_to_path(&state, &path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        for vendor in VendorId::all() {
+            assert!(
+                raw.contains(&format!("[{}]", vendor_config_section(*vendor))),
+                "missing [{}] after Settings save",
+                vendor_config_section(*vendor)
+            );
+        }
+        let saved = Config::load_from(&path).unwrap();
+        assert!(!saved.zenmux.enabled);
+        assert!(!saved.requesty.enabled);
+        assert!(!saved.tavily.enabled);
+    }
+
+    #[test]
+    fn configured_disabled_zenmux_can_be_activated_visually() {
+        let (_dir, path) = temp_config(None);
+        let mut config = Config::default();
+        config.zenmux.api_key = Some("zmx-test".into());
+        assert!(!config.zenmux.enabled);
+        let mut state = SettingsState::from_config(&config);
+        let index = state
+            .active_choices
+            .iter()
+            .position(|id| *id == VendorId::ZenMux)
+            .expect("configured ZenMux is selectable before enabling");
+        assert!(!state.active_vendors.contains(&VendorId::ZenMux));
+        state.toggle_active(index);
+        save_to_path(&state, &path).unwrap();
+        let saved = Config::load_from(&path).unwrap();
+        assert!(saved.zenmux.enabled);
+        assert!(saved.ui.active_vendors.unwrap().contains(&VendorId::ZenMux));
+    }
+
+    #[test]
     fn saving_a_new_key_adds_its_provider_to_active_scope() {
         let (_dir, path) = temp_config(None);
         let mut state = blank_state(VendorId::Anthropic);
@@ -2041,7 +2141,7 @@ api_key_env = "OPENROUTER_WORK_API_KEY"
         save_to_path(&s, &path).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("old-secret"));
-        assert!(!raw.contains("api_key"));
+        assert!(!raw.contains("api_key ="));
         // Unrelated fields in the same section survive.
         assert!(raw.contains("plan_tier = \"pro\""));
     }
