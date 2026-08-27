@@ -80,9 +80,10 @@ let POINT_CRITICAL_MIN = 10
 // fields (17-22) carry the per-vendor credits — only the selected vendor's is
 // populated — and the `aapi_*` fields (23-26) carry the Anthropic API headline
 // plus its spend-vs-limit bar. `cursor_total_pct` (27) is followed by the
-// Antigravity-only fourth-window fields (28-30), followed by Requesty's
-// balance at 31, ZenMux's PAYG balance at 32, and Vercel AI Gateway's credit
-// balance at 33. A final literal sentinel
+// Antigravity-only fourth-window fields (28-30) and the Z.AI MCP-tools pool
+// (31-33), which fills that same fourth-window slot. Requesty's balance (34),
+// ZenMux's PAYG balance (35), and Vercel AI Gateway's credit balance (36)
+// follow. A final literal sentinel
 // absorbs the widget's stale suffix, preserving these fields.
 let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_reset};;" +
              "{sonnet_pct};;{sonnet_reset};;{extra_pct};;{extra_spent};;{extra_limit};;" +
@@ -90,7 +91,9 @@ let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_rese
              "{session_elapsed};;{weekly_elapsed};;{scoped_elapsed};;{vendor_short};;{or_balance};;" +
              "{ds_balance};;{kilo_balance};;{nv_balance};;{km_balance};;{grok_balance};;" +
              "{aapi_headline};;{aapi_pct};;{aapi_spent};;{aapi_limit};;{cursor_total_pct};;" +
-              "{extra_model};;{extra_reset};;{extra_elapsed};;{rqy_balance};;{zmx_payg};;{vag_balance}"
+             "{extra_model};;{extra_reset};;{extra_elapsed};;" +
+             "{zai_mcp_pct};;{zai_mcp_reset};;{zai_mcp_elapsed};;" +
+             "{rqy_balance};;{zmx_payg};;{vag_balance}"
 
 let FORMAT_WITH_SENTINEL = FORMAT + ";;__aiub_end__"
 
@@ -137,9 +140,16 @@ func ringTrackColor(_ appearance: NSAppearance) -> NSColor {
     return isDark ? NSColor.white.withAlphaComponent(0.25) : hexColor(COLOR_EMPTY)
 }
 
+/// True when a countdown field carries a real value. The widget prints `—` for
+/// a window the vendor did not report, and an older binary that does not know a
+/// placeholder leaves it empty.
+func isReported(_ countdown: String) -> Bool {
+    !countdown.isEmpty && countdown != "—"
+}
+
 // A missing reset keeps its row visible but never has a meaningful pace marker.
 func markerElapsed(reset: String, elapsed: Int?) -> Int? {
-    guard !reset.isEmpty, reset != "—" else { return nil }
+    guard isReported(reset) else { return nil }
     return elapsed
 }
 
@@ -454,9 +464,9 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
     case "moonshot": balanceFieldIndex = 21
     case "grok": balanceFieldIndex = 22
     case "anthropic_api": balanceFieldIndex = 23
-    case "requesty": balanceFieldIndex = 31
-    case "zenmux": balanceFieldIndex = 32
-    case "vercel-ai-gateway": balanceFieldIndex = 33
+    case "requesty": balanceFieldIndex = 34
+    case "zenmux": balanceFieldIndex = 35
+    case "vercel-ai-gateway": balanceFieldIndex = 36
     default: balanceFieldIndex = nil
     }
     let balance = balanceFieldIndex.flatMap {
@@ -491,6 +501,14 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
     if isAntigravity, !t(28).isEmpty {
         secondaryWeekly = quotaWindow(7, 29, 30)
         secondaryWeeklyLabel = "\(t(28)) Weekly"
+    } else if vendor == "zai", isReported(t(32)), let mcp = quotaWindow(31, 32, 33) {
+        // Z.AI's monthly MCP-tools pool is a real quota window with its own
+        // reset, so it rides the same fourth-window slot Antigravity uses.
+        // `{zai_mcp_pct}` flattens an absent pool to "0", so the reset is the
+        // presence signal — an account with no MCP quota reports "—" there and
+        // must not grow a phantom 0% row.
+        secondaryWeekly = mcp
+        secondaryWeeklyLabel = "MCP tools (monthly)"
     } else {
         secondaryWeekly = nil
         secondaryWeeklyLabel = ""

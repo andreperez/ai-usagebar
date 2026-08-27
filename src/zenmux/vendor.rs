@@ -41,7 +41,7 @@ pub fn headline(snapshot: &ZenMuxSnapshot) -> String {
             snapshot
                 .payg
                 .as_ref()
-                .map(|payg| format_money(payg.total_credits))
+                .map(|payg| crate::format::usd(payg.total_credits))
                 .unwrap_or_else(|| "—".into())
         },
         |subscription| {
@@ -110,17 +110,17 @@ fn build_placeholders_with_tolerance(
         ("zmx_headline", headline(snapshot)),
         (
             "zmx_payg",
-            payg.map(|payg| format_money(payg.total_credits))
+            payg.map(|payg| crate::format::usd(payg.total_credits))
                 .unwrap_or_else(|| "—".into()),
         ),
         (
             "zmx_topup",
-            payg.map(|payg| format_money(payg.top_up_credits))
+            payg.map(|payg| crate::format::usd(payg.top_up_credits))
                 .unwrap_or_else(|| "—".into()),
         ),
         (
             "zmx_bonus",
-            payg.map(|payg| format_money(payg.bonus_credits))
+            payg.map(|payg| crate::format::usd(payg.bonus_credits))
                 .unwrap_or_else(|| "—".into()),
         ),
         (
@@ -302,10 +302,6 @@ pub fn render(
     }
 }
 
-fn format_money(amount: f64) -> String {
-    format!("${amount:.2}")
-}
-
 fn format_flows(flows: f64) -> String {
     if flows.fract() == 0.0 {
         format!("{flows:.0}")
@@ -339,13 +335,13 @@ fn render_tooltip(
         lines.push(TooltipLine::Body(format!(
             "   <span font_weight='bold' foreground='{}'>{}</span>",
             severity_color(balance_severity(payg.total_credits), theme),
-            format_money(payg.total_credits)
+            crate::format::usd(payg.total_credits)
         )));
         lines.push(TooltipLine::Body(format!(
             " <span foreground='{}'>     top-up {} · bonus {}</span>",
             theme.dim,
-            format_money(payg.top_up_credits),
-            format_money(payg.bonus_credits)
+            crate::format::usd(payg.top_up_credits),
+            crate::format::usd(payg.bonus_credits)
         )));
     }
     if let Some(subscription) = &snapshot.subscription {
@@ -361,7 +357,7 @@ fn render_tooltip(
             " <span foreground='{}'>     monthly max {} flows · {}</span>",
             theme.dim,
             format_flows(subscription.monthly_max_flows),
-            format_money(subscription.monthly_max_value_usd)
+            crate::format::usd(subscription.monthly_max_value_usd)
         )));
         lines.push(TooltipLine::Body(format!(
             " <span foreground='{}'>     expires {}</span>",
@@ -397,8 +393,8 @@ fn push_quota(
         theme.dim,
         format_flows(quota.used_flows),
         format_flows(quota.max_flows),
-        format_money(quota.used_value_usd),
-        format_money(quota.max_value_usd)
+        crate::format::usd(quota.used_value_usd),
+        crate::format::usd(quota.max_value_usd)
     )));
     lines.push(TooltipLine::Body(format!(
         " <span foreground='{}'>       reset {}</span>",

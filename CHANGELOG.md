@@ -41,6 +41,123 @@ Each release is also published at
 - Vercel AI Gateway credits, lifetime spend, and optional month-to-date Custom
   Reporting totals with an independently cached, opt-in reporting query.
 
+## [1.7.0] — 2026-08-25
+
+### Added
+
+- The macOS menu bar shows Z.AI's monthly MCP-tools pool as a fourth row, with
+  its own bar, reset and pace marker — the widget, TUI and native panels have
+  always listed it, only the menu bar had no field for it. It fills the same
+  fourth-window slot Antigravity's second pool uses. An account with no MCP
+  quota reports no reset for it and keeps three rows, and an older binary that
+  does not know `{zai_mcp_*}` degrades the same way.
+
+### Changed
+
+- Kimi's tooltip is drawn with the same window block every other vendor uses —
+  icon + label, progress bar with the percentage, then the reset countdown —
+  instead of the bare `26 / 100  (26%)` pairs it printed before. The counters
+  and the vendor's own remaining figure ride the reset line
+  (`26 / 100 · 74 left`) so nothing reported is lost, and its bar text follows
+  the `{pct}% · {reset}` shape the other percentage vendors already use
+  (`{kimi_weekly_pct}% · {kimi_weekly_reset}`, was a bare `{kimi_weekly_pct}%`).
+- MiniMax's tooltip rows are drawn with the shared window block too, so each
+  pool shows a progress bar rather than a bare `Session 20%` pair.
+
+### Fixed
+
+- Z.AI and MiniMax show the pace arrow (`↑` / `→` / `↓`) next to each
+  percentage in the widget and `--vendor` tooltips. The pace placeholders added
+  in 1.3.0 reached the macOS menu bar, but the default tooltip never consulted
+  them: `tooltip::push_window` had no way to render a glyph, and only the
+  Anthropic renderer had one hand-rolled. The shared helper now takes a
+  `WindowRow`, so the arrow travels with the row. As on the Anthropic tooltip,
+  the elapsed marker inside the bar stays behind `--tooltip-pace-pts`; Codex and
+  Antigravity rows are unchanged.
+
+## [1.6.0] — 2026-08-25
+
+### Added
+
+- First-party Nix flake packaging supports `nix run`, profile installation,
+  direct NixOS and Home Manager consumption, an overlay, and a development
+  shell on x86_64 and aarch64 Linux and macOS.
+
+### Fixed
+
+- A `401`/`403` response body no longer reaches the widget tooltip or the TUI on
+  the run that hit it. The body was redacted on its way to the `.last_error`
+  file but the copy handed to the outcome was built separately from the raw
+  body, so signing out with a warm cache showed the body once and the neutral
+  message on every run after. `Cache::write_last_error` now returns exactly what
+  it persisted, and every vendor that built the pair itself passes that value on
+  — Anthropic, Anthropic API, Antigravity, Deepseek, Grok, Kilo, MiniMax,
+  Moonshot, Novita, OpenAI, OpenRouter and Z.ai. Cursor, Kimi and Kiro already
+  redacted at this point and are unchanged.
+- Antigravity no longer reports a TLS listener's `400 Client sent an HTTP
+  request to an HTTPS server` as the reason a probe run failed. Each product
+  binds an RPC port and an HTTPS port, and the probe order reaches the HTTPS
+  one only after the RPC one has already answered, so that reply describes our
+  own probe rather than the product. Because it is an `Http` and not a
+  `Transport`, letting it stand as the last failure also cost the silent cache
+  fallback that a not-yet-serving product is supposed to get. It is now ranked
+  below every other failure, and still reported when nothing else answered.
+
+## [1.5.2] — 2026-08-24
+
+### Fixed
+
+- Terminal escape sequences in a subprocess's stderr, or in a filesystem path,
+  can no longer repaint or forge a line in output the user is reading (#122).
+  `security` and `tar` diagnostics, `AppError::Io`'s path, the Cursor database
+  diagnostics, and the notes printed by `account switch` are all sanitized now.
+
+## [1.5.1] — 2026-08-23
+
+### Fixed
+
+- `cargo clippy -- -D warnings` now runs on macOS and Windows as well as Linux.
+  Each platform compiles a different slice of the crate — the macOS Keychain
+  fallback, the Windows process and TCP-table walk — so a lint on the slice the
+  Linux job never sees was a lint nobody saw. Two credential helpers and a test
+  seam that were unreachable on Windows are gated accordingly.
+
+- Google Antigravity probes the RPC listener ahead of the TLS one on Linux and
+  macOS too, not just Windows, and keeps each running product's listeners in
+  their own group when ordering them. With more than one product up, every RPC
+  listener is now tried before any TLS listener instead of the two products'
+  ports interleaving by number and putting back the `agy` handshake warnings
+  v1.5.0 set out to silence (#121). An `ANTIGRAVITY_LS_ADDRESS` that leaves no
+  host to connect to is dropped rather than probed.
+- A negative balance is now spelled the same way everywhere. DeepSeek, Moonshot
+  (whose `cash_balance` is explicitly a debt), Kimi, SuperGrok, and the TUI
+  panel rows rendered it as `$-5.71` while OpenRouter, Grok, Kilo, and Novita
+  rendered `-$5.71`. Every renderer now goes through one `format::money`, which
+  also keeps a negative zero or a sub-cent debt from printing as `-$0.00`.
+
+## [1.5.0] — 2026-08-23
+
+### Added
+
+- The Omarchy panel's reset row now shows the wall-clock time the limit window
+  reopens alongside the countdown — `Resets in 4h 5m · 13:54` — and dates it
+  whenever the reset lands on another day (#120).
+
+### Fixed
+
+- OpenRouter no longer hides a negative credit balance behind a healthy-looking
+  `$0.00` in green (#118). A balance in debt is shown with its sign — `-$5.71` —
+  and is treated as critical everywhere, including on an account that never
+  bought credits, where the consumed-percentage has no denominator and used to
+  report a reassuring 0%.
+- Google Antigravity no longer gives up when `ANTIGRAVITY_LS_ADDRESS` points at
+  a port that has moved. The override is still tried first, but discovered local
+  ports are now probed behind it, and a signed-out server's authentication error
+  is reported instead of being masked by connection refusals from products that
+  are simply not running (#119). On Windows the RPC listener is probed before
+  the TLS one, which also silences the TLS handshake warnings `agy` used to log
+  on every poll.
+
 ## [1.4.0] — 2026-08-21
 
 ### Added
@@ -1621,7 +1738,12 @@ vendors. Highlights:
 - Live API smoke test suite (`make smoke`) that exercises the real
   undocumented endpoints to detect schema drift before users do.
 
-[Unreleased]: https://github.com/akitaonrails/ai-usagebar/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/akitaonrails/ai-usagebar/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.5.2...v1.6.0
+[1.5.2]: https://github.com/akitaonrails/ai-usagebar/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/akitaonrails/ai-usagebar/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/akitaonrails/ai-usagebar/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.2.0...v1.3.0

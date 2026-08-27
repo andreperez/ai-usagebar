@@ -34,12 +34,12 @@ pub fn build_placeholders(snapshot: &VercelGatewaySnapshot) -> HashMap<&'static 
         ("session_reset", "".into()),
         ("weekly_pct", "".into()),
         ("weekly_reset", "".into()),
-        ("vag_balance", money(snapshot.balance)),
-        ("vag_used", money(snapshot.total_used)),
+        ("vag_balance", crate::format::usd(snapshot.balance)),
+        ("vag_used", crate::format::usd(snapshot.total_used)),
         (
             "vag_mtd",
             report
-                .map(|r| money(r.mtd_cost))
+                .map(|r| crate::format::usd(r.mtd_cost))
                 .unwrap_or_else(|| "—".into()),
         ),
         (
@@ -97,9 +97,6 @@ pub fn render(
         class: Class::from(severity(snapshot)),
     }
 }
-fn money(value: f64) -> String {
-    format!("${value:.2}")
-}
 fn tooltip(
     outcome: &VendorOutcome,
     s: &VercelGatewaySnapshot,
@@ -114,14 +111,14 @@ fn tooltip(
         TooltipLine::Sep,
         TooltipLine::Body(format!(
             " Balance {} · lifetime used {}",
-            money(s.balance),
-            money(s.total_used)
+            crate::format::usd(s.balance),
+            crate::format::usd(s.total_used)
         )),
     ];
     if let Some(r) = &s.report {
         lines.push(TooltipLine::Body(format!(
             " Month to date {} · {} requests",
-            money(r.mtd_cost),
+            crate::format::usd(r.mtd_cost),
             r.requests
         )));
         lines.push(TooltipLine::Body(format!(

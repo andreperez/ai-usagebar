@@ -35,7 +35,7 @@ pub fn warning_kind(code: u16, message: &str) -> WarningKind {
 pub const DEFAULT_FORMAT: &str = "{rqy_balance}";
 
 pub fn headline(snapshot: &RequestySnapshot) -> String {
-    format_money(snapshot.balance)
+    crate::format::usd(snapshot.balance)
 }
 
 pub fn build_placeholders(snapshot: &RequestySnapshot) -> HashMap<&'static str, String> {
@@ -50,11 +50,11 @@ pub fn build_placeholders(snapshot: &RequestySnapshot) -> HashMap<&'static str, 
         ("weekly_reset", "—".to_string()),
         ("rqy_headline", headline(snapshot)),
         ("rqy_org", snapshot.org_name.clone()),
-        ("rqy_balance", format_money(snapshot.balance)),
+        ("rqy_balance", crate::format::usd(snapshot.balance)),
         (
             "rqy_mtd",
             usage
-                .map(|usage| format_money(usage.mtd_spend))
+                .map(|usage| crate::format::usd(usage.mtd_spend))
                 .unwrap_or_else(|| "—".into()),
         ),
         (
@@ -140,10 +140,6 @@ pub fn render(
     }
 }
 
-fn format_money(amount: f64) -> String {
-    format!("${amount:.2}")
-}
-
 fn render_tooltip(
     outcome: &VendorOutcome,
     snapshot: &RequestySnapshot,
@@ -164,7 +160,7 @@ fn render_tooltip(
     )));
     lines.push(TooltipLine::Body(format!(
         "   <span font_weight='bold' foreground='{color}'>{}</span>",
-        format_money(snapshot.balance)
+        crate::format::usd(snapshot.balance)
     )));
     if let Some(usage) = &snapshot.usage {
         lines.push(TooltipLine::Body("".into()));
@@ -175,7 +171,7 @@ fn render_tooltip(
         lines.push(TooltipLine::Body(format!(
             "   <span foreground='{}'>{} · {} requests</span>",
             theme.dim,
-            format_money(usage.mtd_spend),
+            crate::format::usd(usage.mtd_spend),
             usage.requests
         )));
         lines.push(TooltipLine::Body(format!(

@@ -13,6 +13,19 @@ When cutting a new version (patch, minor, or major):
    - Add a new `## [X.Y.Z] — YYYY-MM-DD` section above the previous one.
    - Categorize entries by **Added / Changed / Fixed / Security** (Keep-A-Changelog).
    - Update the `[Unreleased]` compare link and add a new release link at the bottom.
+   - **Prove no published section moved**, before tagging:
+     ```
+     git diff <previous-tag> HEAD -- CHANGELOG.md | grep '^-' | grep -v '^---' \
+       | grep -v '^-\[Unreleased\]:'
+     ```
+     The `[Unreleased]:` compare link is excluded because it legitimately
+     changes every release; a check that fires every time gets ignored, which
+     is worse than no check. Any *other* output means an already-released
+     section changed. A PR branched before the last tag carries its entries
+     under `[Unreleased]`, and git merges them *cleanly* into whatever now
+     sits at that position — which is the section you just published. It
+     happened to v1.6.0 (#127's entries landed in it after release) and was
+     caught only by this diff. A clean merge is not evidence here; the diff is.
 3. **Bump `packaging/aur/PKGBUILD`** — `pkgver=X.Y.Z`, `pkgrel=1`, reset `sha256sums` to `'SKIP'`.
 4. **Bump `packaging/aur/PKGBUILD-bin`** — same `pkgver`, `pkgrel=1`, reset both
    `sha256sums_x86_64` and `sha256sums_aarch64` to `'SKIP'`.
@@ -92,6 +105,15 @@ patch version instead.
   Waybar instances coexist via per-vendor `flock`.
 - **Tag immutability.** Never `git push --force origin vX.Y.Z` once a
   release is public. The one-time exception in v0.3.0 was a mistake.
+- **Untrusted text is sanitized at the sink, not at the call site.** A
+  subprocess's stderr, a vendor response, and a path carrying an account label
+  are all data, not terminal programs. `pango::escape` and the TUI already
+  sanitize what they render; `AppError::Io`'s `Display` sanitizes its path so
+  every one of ~94 sites is covered. The gap is plain `println!`/`eprintln!`:
+  anything reaching one — `claude_desktop` notes especially — goes through
+  `display::sanitize_untrusted_{line,path}` first. A guard test forbids a bare
+  `.display()` inside `notes.push`. Note the exception it documents: a path
+  used as an *argument* (tar members) must stay raw, or the filename breaks.
 - **No secrets in tracked files.** Inline API keys in config.toml are
   the user's choice (and `chmod 600`ed by the Settings overlay), but
   **never commit** a real key. The `.gitignore` covers `.env`,
@@ -99,7 +121,11 @@ patch version instead.
 - **Frontend adapters stay thin.** Provider fetching, credentials, canonical
   product names, metric projection, and reset metadata belong in Rust.
   `VendorId::display_name` is the shared label source; do not add a complete
-  provider-name table to a frontend. Build report metrics through
+  provider-name table to a frontend. `format::{money, usd}` is the shared money
+  source — a balance can be negative (OpenRouter overrun, Moonshot
+  `cash_balance`) and the sign belongs outside the symbol, so never reach for
+  `format!("${v:.2}")`; it had regrown into four disagreeing copies once
+  already. Build report metrics through
   `SectionBuilder::push_metric` so the absolute reset travels with its row;
   never recreate a per-vendor metric-order table in `report.rs`.
 - **Tests are hermetic.** A `#[test]`/`#[tokio::test]` must never read or
@@ -157,10 +183,16 @@ vendor's response shape drifts:
   no credential and no remote endpoint: quota comes from whichever local
   Antigravity product is running (2.0, the IDE, or an interactive `agy`
   session), over a loopback RPC on a **dynamically assigned** port that is
-  discovered from `/proc` on Linux or `lsof` on macOS (elsewhere set
-  `ANTIGRAVITY_LS_ADDRESS`).
-  Tests must never probe `/proc` or the wall clock — use `candidate_bases_with`
-  and `parse_cache_at`/`fetch_snapshot_at`, not their production wrappers.
+  discovered from `/proc` on Linux, `lsof` on macOS, and the process/TCP-table
+  APIs on Windows. `ANTIGRAVITY_LS_ADDRESS` is a *first* candidate, not an
+  exclusive one — discovered ports are still probed behind it, so a stale
+  override degrades to a slower success instead of a hard failure.
+  Discovered ports are grouped per pid and emitted rank by rank (`probe_order`),
+  so with two products up every RPC listener is probed before any TLS one.
+  Tests must never probe `/proc`, `lsof` or the wall clock — use
+  `candidate_bases_with`, `probe_order`, `matching_windows_ports`,
+  `parse_lsof_pcn` and `parse_cache_at`/`fetch_snapshot_at`, not their
+  production wrappers.
 - `src/kiro/` — Kiro CLI. Reads kiro-cli's own `data.sqlite3` (read-only) for
   the AWS SSO OIDC session, refreshes the ~1h access token via the documented
   CreateToken API, and calls the undocumented `GetUsageLimits` — same operation
