@@ -363,6 +363,11 @@ ai-usagebar --json
 ai-usagebar usage
 ai-usagebar usage --json | jq '.entries[] | {id, metrics, sections}'
 
+# Compare current published default input/output model prices across
+# OpenRouter, Requesty, and Vercel AI Gateway.
+ai-usagebar prices --model openai/gpt-5.6-sol
+ai-usagebar prices --model openai/gpt-5.6-sol --json
+
 # Live preview while iterating on --format / --tooltip-format.
 ai-usagebar --vendor openrouter --watch 5
 
@@ -382,6 +387,19 @@ may add `severity` and an absolute `reset_at`. These fields are additive, so
 existing consumers remain compatible. `short_name` is the same three-letter
 code `{vendor_short}` prints, so a frontend that wants a compact provider tag
 takes it from the report instead of keeping its own table.
+
+## Model Price Comparison
+
+`ai-usagebar prices` compares published model catalog prices from OpenRouter,
+Requesty, and Vercel AI Gateway. It compares only exact model identifiers and
+reports input and output winners independently; a single overall winner appears
+only when one gateway is no more expensive for both prices.
+
+Catalogs refresh independently every six hours. OpenRouter and Vercel catalogs
+are public; Requesty uses its configured key when available so the catalog can
+reflect models approved for that organization. Tiered, regional, time-based,
+cache, request, image, and web-search prices remain outside the default winner
+calculation because they are not directly comparable to a base token price.
 
 ## Standalone TUI
 

@@ -150,6 +150,16 @@ pub enum Command {
         json: bool,
     },
 
+    /// Compare published model prices across supported gateways.
+    Prices {
+        /// Machine-readable output.
+        #[arg(long)]
+        json: bool,
+        /// Compare one exact canonical model ID.
+        #[arg(long)]
+        model: Option<String>,
+    },
+
     /// Read or update settings for native desktop frontends.
     Settings {
         #[command(subcommand)]
@@ -482,6 +492,21 @@ mod tests {
         assert_eq!(opencode.vendor, Some(Vendor::OpenCodeGo));
         let login = Cli::parse_from(["ai-usagebar", "auth", "nous", "login"]);
         assert!(matches!(login.command, Some(Command::Auth { .. })));
+    }
+
+    #[test]
+    fn prices_command_accepts_json_and_exact_model_filters() {
+        let cli = Cli::parse_from([
+            "ai-usagebar",
+            "prices",
+            "--json",
+            "--model",
+            "openai/gpt-test",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Prices { json: true, model: Some(model) }) if model == "openai/gpt-test"
+        ));
     }
 
     #[test]

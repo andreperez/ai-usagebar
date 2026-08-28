@@ -30,6 +30,23 @@ defensive and includes opt-in live tests for catching response changes.
 | **ZenMux** | `zenmux.ai/api/v1/management/payg/balance` + `/subscription/detail` (documented Management API) | PAYG balance plus optional subscription 5h/7d quotas, status, and monthly cap | Yes |
 | **Vercel AI Gateway** | `ai-gateway.vercel.sh/v1/credits` + optional `/report` (documented REST API) | Credit balance, lifetime spend, and optional month-to-date reporting totals | Yes |
 
+## Model Catalogs
+
+`ai-usagebar prices` uses independent, read-only catalog caches to compare
+default input and output token prices for exact model IDs. It does not affect
+provider balance or quota refreshes.
+
+| Gateway | Endpoint | Authentication |
+|---|---|---|
+| OpenRouter | `GET openrouter.ai/api/v1/models` | Not required |
+| Requesty | `GET router.requesty.ai/v1/models` | Optional `REQUESTY_API_KEY`; authenticated results honor organization approvals |
+| Vercel AI Gateway | `GET ai-gateway.vercel.sh/v1/models` | Not required |
+
+The comparison does not infer equivalence from aliases or display names. It
+compares base per-token input/output rates only; pricing tiers, caches, request
+fees, modality charges, regions, and time-based overrides are retained by the
+upstream catalogs but are not collapsed into a misleading single price.
+
 
 ## Stability notes
 

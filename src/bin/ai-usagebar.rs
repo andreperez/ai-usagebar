@@ -45,6 +45,9 @@ fn main() {
     if let Some(Command::Usage { json }) = &cli.command {
         std::process::exit(rt.block_on(ai_usagebar::report::run(*json)));
     }
+    if let Some(Command::Prices { json, model }) = &cli.command {
+        std::process::exit(rt.block_on(ai_usagebar::prices::run(*json, model.as_deref())));
+    }
     let code = rt.block_on(run(cli));
     std::process::exit(code);
 }

@@ -34,26 +34,26 @@ premium requests, plus 28-day Copilot usage-metrics reports.
   that organization reports are membership-attributed and cannot be summed with
   enterprise reports.
 
-### 2. Model Price Comparison
+### 2. Model Price Comparison  ✅
 
 **Viable now for three gateways.** Compare published, current catalog prices
 for matching model identifiers from OpenRouter, Requesty, and Vercel AI Gateway.
 
-- Add a read-only `ai-usagebar prices` command rather than mixing price catalog
+- [x] Add a read-only `ai-usagebar prices` command rather than mixing price catalog
   refreshes into quota widgets or provider credit refreshes.
-- Fetch `GET /api/v1/models` from OpenRouter, `GET /v1/models` from Requesty,
+- [x] Fetch `GET /api/v1/models` from OpenRouter, `GET /v1/models` from Requesty,
   and `GET /v1/models` from Vercel AI Gateway. Requesty receives its configured
   key when available so the catalog reflects organization-approved models.
-- Normalize only exact canonical model IDs first. Never infer equivalence from
+- [x] Normalize only exact canonical model IDs first. Never infer equivalence from
   display names, aliases, or provider marketing labels.
-- Compare default input and output USD-per-token prices separately. Preserve
+- [x] Compare default input and output USD-per-token prices separately. Preserve
   cache read/write, request, image, web-search, context-tier, region, temporal,
   and conditional pricing as metadata; do not select a universal "cheapest"
   when those terms differ.
-- Output each comparable model with the cheapest input provider, cheapest output
+- [x] Output each comparable model with the cheapest input provider, cheapest output
   provider, and a same-provider winner only when one provider is no more
   expensive in both values. Mark ties and incomplete entries explicitly.
-- Cache catalogs independently with a 6-hour TTL. Public OpenRouter/Vercel
+- [x] Cache catalogs independently with a 6-hour TTL. Public OpenRouter/Vercel
   catalogs must work without a usage credential; Requesty catalog errors must
   not affect its balance integration.
 
