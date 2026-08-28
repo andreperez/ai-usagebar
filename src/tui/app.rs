@@ -27,6 +27,13 @@ pub enum TabState {
 }
 
 #[derive(Debug, Clone)]
+pub enum PricePanelState {
+    Loading,
+    Ready(Vec<crate::prices::PriceComparison>),
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
 pub struct ReadyTab {
     pub snapshot: crate::usage::VendorSnapshot,
     pub stale: bool,
@@ -234,6 +241,9 @@ pub struct App {
     pub quit: bool,
     /// When `Some`, the Settings overlay is open and consuming key events.
     pub settings: Option<crate::tui::settings::SettingsState>,
+    /// On-demand price catalog comparison. It remains separate from provider
+    /// tabs so periodic quota refreshes never trigger catalog downloads.
+    pub prices: Option<PricePanelState>,
     /// Local context monitoring is separately opt-in and never changes the
     /// vendor tab set.
     pub context_enabled: bool,
@@ -273,6 +283,7 @@ impl App {
             theme,
             quit: false,
             settings: None,
+            prices: None,
             context_enabled: false,
             context_generation: 0,
             context: None,

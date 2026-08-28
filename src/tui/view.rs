@@ -10,7 +10,7 @@ use ratatui_bubbletea_components::{Help, KeyBinding, ListItem, SelectList};
 use crate::format::local_time_hms;
 use crate::tui::app::TabId;
 use crate::tui::app::TabState;
-use crate::tui::app::{App, FooterAction, NavTarget};
+use crate::tui::app::{App, FooterAction, NavTarget, PricePanelState};
 use crate::tui::panels;
 use crate::tui::style::{bubble_theme, color, severity_color};
 use crate::vendor::VendorId;
@@ -57,6 +57,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     hit.settings_rows.clear();
     if let Some(s) = &app.settings {
         crate::tui::settings::render(f, f.area(), s, &app.theme, &mut hit.settings_rows);
+    }
+    if let Some(state) = &app.prices {
+        draw_prices(f, f.area(), state, &app.theme);
     }
 }
 
@@ -428,6 +431,11 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             description: "switch",
         },
         FooterBinding {
+            action: None,
+            key: "p",
+            description: "prices",
+        },
+        FooterBinding {
             action: Some(FooterAction::Refresh),
             key: "r",
             description: "refresh",
@@ -483,6 +491,61 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .saturating_add(FOOTER_SEPARATOR_WIDTH);
     }
     app.hit.borrow_mut().footer_actions = actions;
+}
+
+fn draw_prices(f: &mut Frame, area: Rect, state: &PricePanelState, theme: &crate::theme::Theme) {
+    let bubble = bubble_theme(theme);
+    let modal = crate::tui::settings::centered_rect(88, 84, area);
+    let block = bubble.titled_modal_block(" Model prices ");
+    let inner = block.inner(modal);
+    f.render_widget(block, modal);
+    let mut lines = vec![
+        Line::from(bubble.muted(
+            " Exact model IDs only · base input/output USD per million tokens · Esc closes",
+        )),
+        Line::from(""),
+    ];
+    match state {
+        PricePanelState::Loading => lines.push(Line::from(
+            bubble.muted(" Loading public model catalogs..."),
+        )),
+        PricePanelState::Error(error) => lines.push(Line::from(Span::styled(
+            error.clone(),
+            Style::default().fg(bubble.palette.error),
+        ))),
+        PricePanelState::Ready(comparisons) if comparisons.is_empty() => lines.push(Line::from(
+            bubble.muted(" No exact model IDs are available from two or more catalogs."),
+        )),
+        PricePanelState::Ready(comparisons) => {
+            for comparison in comparisons.iter().take(24) {
+                let overall = match comparison.overall_winner {
+                    Some(gateway) => gateway.label(),
+                    None if comparison.overall_tied => "tie",
+                    None => "input/output tradeoff",
+                };
+                lines.push(Line::from(Span::styled(
+                    comparison.model_id.clone(),
+                    bubble.focused_border,
+                )));
+                lines.push(Line::from(format!(
+                    "   input {} · output {} · overall {}",
+                    comparison.input_winner.label(),
+                    comparison.output_winner.label(),
+                    overall
+                )));
+                for price in &comparison.prices {
+                    lines.push(Line::from(format!(
+                        "   {:<20} ${:.4}/M input · ${:.4}/M output",
+                        price.gateway.label(),
+                        price.input_per_million,
+                        price.output_per_million
+                    )));
+                }
+                lines.push(Line::from(""));
+            }
+        }
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]

@@ -1541,7 +1541,7 @@ fn save_line(focused: bool, theme: &BubbleTheme) -> Line<'static> {
 }
 
 /// Center a rectangle of `percent_x * percent_y` over `r`.
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_h = (r.height * percent_y) / 100;
     let popup_w = (r.width * percent_x) / 100;
     Rect {

@@ -9,6 +9,7 @@
 //!   R   refresh all tabs
 //!   c   local Claude Code context sessions (when enabled)
 //!   s   settings overlay (mouse clicks select fields)
+//!   p   published model price comparison
 //!   q / Esc / Ctrl-C   quit
 
 use std::io;
@@ -17,8 +18,8 @@ use std::time::{Duration, SystemTime};
 
 use ai_usagebar::config::Config;
 use ai_usagebar::tui::app::{
-    ANTHROPIC_REFRESH_STAGGER, App, FooterAction, REFRESH_INTERVAL, TabId, TabState, refresh_one,
-    refresh_stagger, tabs_with_desktop,
+    ANTHROPIC_REFRESH_STAGGER, App, FooterAction, PricePanelState, REFRESH_INTERVAL, TabId,
+    TabState, refresh_one, refresh_stagger, tabs_with_desktop,
 };
 use ai_usagebar::tui::view::draw;
 use ai_usagebar::vendor::HTTP_CLIENT_TIMEOUT;
@@ -192,6 +193,9 @@ where
         u64,
         std::result::Result<ai_usagebar::context::ContextScan, String>,
     )>();
+    let (prices_tx, mut prices_rx) = mpsc::unbounded_channel::<
+        std::result::Result<Vec<ai_usagebar::prices::PriceComparison>, String>,
+    >();
     spawn_all(app, client, config, &tx);
 
     // ONE reader thread for the whole session. Spawning a fresh
@@ -254,6 +258,12 @@ where
                 if let Some(context) = app.context.as_mut() {
                     context.apply_scan(generation, result);
                 }
+            }
+            Some(result) = prices_rx.recv() => {
+                app.prices = Some(match result {
+                    Ok(comparisons) => PricePanelState::Ready(comparisons),
+                    Err(error) => PricePanelState::Error(error),
+                });
             }
             // Periodic auto-refresh of all tabs.
             _ = tick.tick() => {
@@ -347,6 +357,12 @@ where
                         }
                         continue;
                     }
+                    if app.prices.is_some() {
+                        if matches!(k.code, KeyCode::Esc | KeyCode::Char('p')) {
+                            app.prices = None;
+                        }
+                        continue;
+                    }
                     // Settings overlay consumes all keys when open.
                     if let Some(s) = app.settings.as_mut() {
                         use ai_usagebar::tui::settings::handle_key as shandle;
@@ -366,6 +382,17 @@ where
                     // Normal key handling (settings closed).
                     if matches!(k.code, KeyCode::Char('s')) {
                         open_settings(app, config);
+                        continue;
+                    }
+                    if matches!(k.code, KeyCode::Char('p')) {
+                        app.prices = Some(PricePanelState::Loading);
+                        let prices_tx = prices_tx.clone();
+                        tokio::spawn(async move {
+                            let result = ai_usagebar::prices::load_comparisons(None)
+                                .await
+                                .map_err(|error| error.user_message());
+                            let _ = prices_tx.send(result);
+                        });
                         continue;
                     }
                     if matches!(k.code, KeyCode::Char('c'))

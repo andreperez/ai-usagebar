@@ -33,7 +33,7 @@ pub enum Gateway {
 }
 
 impl Gateway {
-    const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::OpenRouter => "OpenRouter",
             Self::Requesty => "Requesty",
@@ -61,7 +61,7 @@ struct PriceRow<'a> {
 }
 
 pub async fn run(json: bool, model: Option<&str>) -> i32 {
-    match load_and_compare(model).await {
+    match load_comparisons(model).await {
         Ok(comparisons) => {
             if json {
                 println!("{}", serde_json::json!({"comparisons": comparisons}));
@@ -96,7 +96,7 @@ pub async fn run(json: bool, model: Option<&str>) -> i32 {
     }
 }
 
-async fn load_and_compare(model: Option<&str>) -> Result<Vec<OwnedComparison>> {
+pub async fn load_comparisons(model: Option<&str>) -> Result<Vec<PriceComparison>> {
     let config = Config::load()?;
     let client = reqwest::Client::builder()
         .timeout(HTTP_CLIENT_TIMEOUT)
@@ -159,26 +159,26 @@ async fn load_and_compare(model: Option<&str>) -> Result<Vec<OwnedComparison>> {
     Ok(comparisons)
 }
 
-#[derive(Debug, Serialize)]
-struct OwnedComparison {
-    model_id: String,
-    input_winner: Gateway,
-    output_winner: Gateway,
-    overall_winner: Option<Gateway>,
-    overall_tied: bool,
-    prices: Vec<OwnedPriceRow>,
+#[derive(Debug, Clone, Serialize)]
+pub struct PriceComparison {
+    pub model_id: String,
+    pub input_winner: Gateway,
+    pub output_winner: Gateway,
+    pub overall_winner: Option<Gateway>,
+    pub overall_tied: bool,
+    pub prices: Vec<PriceRowOwned>,
 }
 
-#[derive(Debug, Serialize)]
-struct OwnedPriceRow {
-    gateway: Gateway,
-    input_per_million: f64,
-    output_per_million: f64,
-    model_id: String,
+#[derive(Debug, Clone, Serialize)]
+pub struct PriceRowOwned {
+    pub gateway: Gateway,
+    pub input_per_million: f64,
+    pub output_per_million: f64,
+    pub model_id: String,
 }
 
-fn owned(comparison: Comparison<'_>) -> OwnedComparison {
-    OwnedComparison {
+fn owned(comparison: Comparison<'_>) -> PriceComparison {
+    PriceComparison {
         model_id: comparison.model_id.into(),
         input_winner: comparison.input_winner,
         output_winner: comparison.output_winner,
@@ -187,7 +187,7 @@ fn owned(comparison: Comparison<'_>) -> OwnedComparison {
         prices: comparison
             .prices
             .into_iter()
-            .map(|price| OwnedPriceRow {
+            .map(|price| PriceRowOwned {
                 gateway: price.gateway,
                 input_per_million: price.input_per_million,
                 output_per_million: price.output_per_million,
