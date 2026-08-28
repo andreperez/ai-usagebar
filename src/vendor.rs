@@ -227,6 +227,11 @@ impl VendorId {
             VendorId::Kiro => "kir",
             VendorId::NousResearch => "nrs",
             VendorId::OpenCodeGo => "ocg",
+            VendorId::Tavily => "tav",
+            VendorId::Firecrawl => "fcw",
+            VendorId::Requesty => "rqy",
+            VendorId::ZenMux => "zmx",
+            VendorId::VercelGateway => "vag",
         }
     }
 
