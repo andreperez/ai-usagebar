@@ -27,6 +27,10 @@ gnome-extension/schemas/gschemas.compiled
 # Compiled macOS menu bar app (built by macos/build.sh)
 macos/ai-usagebar-menubar
 
+# Windows notification-area frontend build artifacts
+windows/bin/
+windows/obj/
+
 # Local screenshots for PR bodies (not tracked; drag into the PR on GitHub)
 macos/printscreen/
 
