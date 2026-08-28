@@ -20,6 +20,11 @@ metrics expand to an empty string unless noted otherwise.
 | Tavily | `tav` | Firecrawl | `fcw` |
 | Requesty | `rqy` | ZenMux | `zmx` |
 | Vercel AI Gateway | `vag` | | |
+| Nous Research | `nrs` | OpenCode Go | `ocg` |
+
+The same codes ride the `ai-usagebar usage --json` report as each entry's
+`short_name`, so a native frontend can draw a Waybar-style provider tag without
+restating the table. Every account of one provider shares that provider's code.
 
 Use `{session_pct}`, `{session_reset}`, `{weekly_pct}`, and `{weekly_reset}`
 when one format must work across providers. Providers without matching time
