@@ -192,6 +192,15 @@ while the other endpoint's sanitized diagnostic is retained for five minutes.
 - Follow `CLAUDE.md` only when cutting a release; provider work alone must not opportunistically change version/package artifacts (`Cargo.toml` version, `manifest.json`, PKGBUILDs, `.SRCINFO`s, `CHANGELOG` compare links are release-only).
 - **REV**: Verify Windows portability: `cargo build --release` on Windows produces `ai-usagebar.exe` + `ai-usagebar-tui.exe`; config path resolves via `directories::ProjectDirs` (`%APPDATA%` fallback), not hard-coded `~/.config`.
 
+**Validation status (2026-08-28, Windows)**: `cargo fmt --all -- --check`,
+`make test` (1,234 library tests, 4 binary tests, 3 end-to-end tests),
+`make desktop-test`, `cargo machete`, and `cargo build --release --bin
+ai-usagebar` passed. Live provider tests remain ignored and credential-gated.
+`make qml-lint`/`make qml-test` remain pending because Qt 6 `qmllint` is not
+installed; `./macos/run-tests.sh` remains pending macOS execution. The strict
+Clippy gate remains blocked only by pre-existing dead-code warnings in
+`src/nous/credentials.rs` on Windows.
+
 ### 10. TUI Navigation & Provider Visibility  ✅ (expanded 2026-08-24 with explicit active scope)
 
 Targets the ratatui TUI (`src/bin/ai-usagebar-tui.rs`, `src/tui/app.rs`, `src/tui/settings.rs`). GNOME/KDE/Omarchy and the macOS menu bar are data-driven from `usage --json`, so they automatically receive only active providers. Requirements are codified in spec §3.8 (REQ-039..047) and AC-021..027.

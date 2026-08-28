@@ -643,7 +643,7 @@ Ordering is the configured `ui.active_vendors` scope (or legacy enabled-and-conf
 - **EXT-002**: Firecrawl API `api.firecrawl.dev` — HTTPS GET `/v2/team/credit-usage` + `/v2/team/credit-usage/historical?byApiKey=false`.
 - **EXT-003**: Requesty API `api-v2.requesty.ai` — HTTPS GET `/v1/manage/org` + `/v1/manage/org/usage` (UTC range, `resolution=day`, optional `group_by` omitted for organization totals).
 - **EXT-004**: ZenMux API `zenmux.ai` — HTTPS GET `/api/v1/management/payg/balance` + `/api/v1/management/subscription/detail` (Bearer management key).
-- **EXT-005**: Vercel AI Gateway `ai-gateway.vercel.sh` — HTTPS GET `/v1/credits` + opt-in `/v1/report` (`from/to/groupBy=day`).
+- **EXT-005**: Vercel AI Gateway `ai-gateway.vercel.sh` — HTTPS GET `/v1/credits` + opt-in `/v1/report` (`start_date/end_date/group_by=day`).
 
 ## Third-Party Services
 
