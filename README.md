@@ -228,6 +228,7 @@ come from environment variables or `config.toml`.
 | OpenCode Go | API key (`OPENCODE_GO_API_KEY` env or `[opencode-go] api_key` in config) | Enable `[opencode-go]`, then enter the key in the Omarchy settings panel or set the environment variable. |
 | Tavily | API key (`TAVILY_API_KEY` env or `[tavily] api_key` in config) | Set either and opt in. Reports the plan's billing-cycle usage (used/limit and a % when the plan has a limit), pay-as-you-go, this key's usage, and the per-endpoint breakdown. Optionally set `[tavily] project_id` to scope the query and cache to one project. |
 | Firecrawl | API key (`FIRECRAWL_API_KEY` env or `[firecrawl] api_key` in config) | Set either and opt in. Reports remaining credits, plan credits, matching billing-period usage, and the billing-period reset. Historical detail is optional. |
+| Parallel | parallel-cli OAuth session (`~/.config/parallel-web-tools/auth.json`, refreshed transparently); optional override via `[parallel] access_token` or a JWT-shaped `PARALLEL_API_KEY` | Enable `[parallel]`. `parallel-cli login` once; access tokens live ~7 minutes, so manual paste is not durable. Reports prepaid balance and pending debit, or invoice billing mode. |
 | Requesty | API key (`REQUESTY_API_KEY` env or `[requesty] api_key` in config) | Set either and opt in. Reports organization balance and, when the management key permits it, month-to-date spend, request, and token totals. |
 | ZenMux | Management API key (`ZENMUX_MANAGEMENT_API_KEY` env or `[zenmux] api_key` in config) | Set either and opt in. Standard inference keys do not work. Reports PAYG balance and subscription 5h/7d quotas when each endpoint is available. |
 | Vercel AI Gateway | API key or OIDC token (`AI_GATEWAY_API_KEY` env or `[vercel-ai-gateway] api_key` in config) | Set either and opt in. Reports credits and lifetime spend. Optional custom reporting is beta, billed per query, and requires a Pro or Enterprise plan. |
@@ -364,7 +365,7 @@ ai-usagebar usage
 ai-usagebar usage --json | jq '.entries[] | {id, metrics, sections}'
 
 # Compare current published default input/output model prices across
-# OpenRouter, Requesty, and Vercel AI Gateway.
+# Kilo Gateway, OpenRouter, Requesty, and Vercel AI Gateway.
 ai-usagebar prices --model openai/gpt-5.6-sol
 ai-usagebar prices --model openai/gpt-5.6-sol --json
 
@@ -390,12 +391,12 @@ takes it from the report instead of keeping its own table.
 
 ## Model Price Comparison
 
-`ai-usagebar prices` compares published model catalog prices from OpenRouter,
-Requesty, and Vercel AI Gateway. It compares only exact model identifiers and
+`ai-usagebar prices` compares published model catalog prices from Kilo Gateway,
+OpenRouter, Requesty, and Vercel AI Gateway. It compares only exact model identifiers and
 reports input and output winners independently; a single overall winner appears
 only when one gateway is no more expensive for both prices.
 
-Catalogs refresh independently every six hours. OpenRouter and Vercel catalogs
+Catalogs refresh independently every six hours. Kilo, OpenRouter, and Vercel catalogs
 are public; Requesty uses its configured key when available so the catalog can
 reflect models approved for that organization. Tiered, regional, time-based,
 cache, request, image, and web-search prices remain outside the default winner

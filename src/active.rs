@@ -119,6 +119,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "opencode-go" => Some(VendorId::OpenCodeGo),
         "tavily" => Some(VendorId::Tavily),
         "firecrawl" => Some(VendorId::Firecrawl),
+        "parallel" => Some(VendorId::Parallel),
         "requesty" => Some(VendorId::Requesty),
         "zenmux" => Some(VendorId::ZenMux),
         "vercel-ai-gateway" => Some(VendorId::VercelGateway),

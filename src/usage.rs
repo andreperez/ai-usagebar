@@ -358,9 +358,32 @@ pub enum VendorSnapshot {
     OpenCodeGo(crate::opencode_go::types::Usage),
     Tavily(TavilySnapshot),
     Firecrawl(FirecrawlSnapshot),
+    Parallel(ParallelSnapshot),
     Requesty(RequestySnapshot),
     ZenMux(ZenMuxSnapshot),
     VercelGateway(VercelGatewaySnapshot),
+}
+
+/// Parallel Account API organization billing mode and balance, where cents are
+/// preserved until rendering to avoid fractional-cent rounding in the cache.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParallelSnapshot {
+    pub credit_balance_cents: f64,
+    pub pending_debit_balance_cents: f64,
+    pub will_invoice: bool,
+    pub scope_fingerprint: String,
+}
+
+impl Eq for ParallelSnapshot {}
+
+impl ParallelSnapshot {
+    pub fn prepaid_balance(&self) -> Option<f64> {
+        (!self.will_invoice).then_some(self.credit_balance_cents / 100.0)
+    }
+
+    pub fn pending_debit(&self) -> Option<f64> {
+        (!self.will_invoice).then_some(self.pending_debit_balance_cents / 100.0)
+    }
 }
 
 /// Tavily — credit usage from the documented `GET /usage` endpoint. Tavily

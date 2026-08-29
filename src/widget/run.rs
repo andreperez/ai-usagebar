@@ -27,6 +27,7 @@ use crate::novita;
 use crate::openai;
 use crate::openrouter;
 use crate::pango::escape;
+use crate::parallel;
 use crate::requesty;
 use crate::supergrok;
 use crate::tavily;
@@ -167,6 +168,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         Vendor::OpenCodeGo => opencode_go_output(cli, &config).await,
         Vendor::Tavily => tavily_output(cli, &config).await,
         Vendor::Firecrawl => firecrawl_output(cli, &config).await,
+        Vendor::Parallel => parallel_output(cli, &config).await,
         Vendor::Requesty => requesty_output(cli, &config).await,
         Vendor::ZenMux => zenmux_output(cli, &config).await,
         Vendor::VercelGateway => vercel_gateway_output(cli, &config).await,
@@ -854,6 +856,46 @@ async fn requesty_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
     let vendor_outcome: VendorOutcome = outcome.into();
     let opts = RenderOpts::from_cli(cli);
     Ok(requesty::vendor::render(
+        &vendor_outcome,
+        &snapshot,
+        &theme,
+        &opts,
+        now,
+    ))
+}
+
+async fn parallel_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
+    let client = http_client()?;
+    let cache = vendor_cache(cli, "parallel")?;
+    let endpoints = parallel::fetch::Endpoints::default();
+    let now = chrono::Utc::now();
+    let explicit = parallel::credentials::explicit_override(
+        config.parallel.access_token.as_deref(),
+        &config.parallel.access_token_env,
+    );
+    let store = config.parallel.effective_credentials_path();
+    let credential = parallel::credentials::resolve_token(
+        &client,
+        explicit.as_deref(),
+        store.as_deref(),
+        &endpoints.token,
+        now,
+    )
+    .await?;
+    let outcome =
+        match parallel::fetch_snapshot(&client, &credential, &cache, &endpoints, DEFAULT_TTL).await
+        {
+            Ok(outcome) => outcome,
+            Err(error) if error.is_transient() => {
+                return Ok(WaybarOutput::loading(cli.icon.as_deref()));
+            }
+            Err(error) => return Err(error),
+        };
+    let theme = theme_from_cli(cli);
+    let snapshot = outcome.snapshot.clone();
+    let vendor_outcome: VendorOutcome = outcome.into();
+    let opts = RenderOpts::from_cli(cli);
+    Ok(parallel::vendor::render(
         &vendor_outcome,
         &snapshot,
         &theme,

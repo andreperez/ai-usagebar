@@ -27,6 +27,7 @@ pub struct ModelPrice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Gateway {
+    KiloGateway,
     OpenRouter,
     Requesty,
     VercelAiGateway,
@@ -35,6 +36,7 @@ pub enum Gateway {
 impl Gateway {
     pub const fn label(self) -> &'static str {
         match self {
+            Self::KiloGateway => "Kilo Gateway",
             Self::OpenRouter => "OpenRouter",
             Self::Requesty => "Requesty",
             Self::VercelAiGateway => "Vercel AI Gateway",
@@ -112,7 +114,13 @@ pub async fn load_comparisons(model: Option<&str>) -> Result<Vec<PriceComparison
             )
         })
         .transpose()?;
-    let (openrouter, vercel, requesty) = tokio::join!(
+    let (kilo, openrouter, vercel, requesty) = tokio::join!(
+        load_catalog(
+            &client,
+            Gateway::KiloGateway,
+            "https://api.kilo.ai/api/gateway/models",
+            None
+        ),
         load_catalog(
             &client,
             Gateway::OpenRouter,
@@ -132,7 +140,8 @@ pub async fn load_comparisons(model: Option<&str>) -> Result<Vec<PriceComparison
             requesty_key.as_deref()
         ),
     );
-    let mut prices = openrouter?;
+    let mut prices = kilo?;
+    prices.extend(openrouter?);
     prices.extend(vercel?);
     if let Ok(requesty) = requesty {
         prices.extend(requesty);
@@ -447,10 +456,12 @@ mod tests {
     #[test]
     fn catalogs_parse_documented_default_prices_without_model_aliases() {
         let openrouter = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"prompt":"0.000002","completion":"0.000006"}}]}"#, Gateway::OpenRouter).unwrap();
+        let kilo = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"prompt":"0.000004","completion":"0.000008"}}]}"#, Gateway::KiloGateway).unwrap();
         let vercel = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"input":"0.000003","output":"0.000005"}}]}"#, Gateway::VercelAiGateway).unwrap();
         let requesty = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":[{"prompt_tokens_threshold":0,"input_price":0.000001,"output_price":0.000007},{"prompt_tokens_threshold":200000,"input_price":0.000002,"output_price":0.000008}]}]}"#, Gateway::Requesty).unwrap();
         let prices = [
             openrouter[0].clone(),
+            kilo[0].clone(),
             vercel[0].clone(),
             requesty[0].clone(),
         ];

@@ -134,6 +134,13 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         note: "credits & billing period",
     },
     KeyVendor {
+        id: VendorId::Parallel,
+        label: "Parallel",
+        env: "PARALLEL_API_KEY",
+        section: "parallel",
+        note: "reads parallel-cli login; field = token override",
+    },
+    KeyVendor {
         id: VendorId::Requesty,
         label: "Requesty",
         env: "REQUESTY_API_KEY",
@@ -173,6 +180,7 @@ fn config_inline_key<'a>(cfg: &'a Config, section: &str) -> Option<&'a str> {
         "opencode-go" => cfg.opencode_go.api_key.as_deref(),
         "tavily" => cfg.tavily.api_key.as_deref(),
         "firecrawl" => cfg.firecrawl.api_key.as_deref(),
+        "parallel" => cfg.parallel.access_token.as_deref(),
         "requesty" => cfg.requesty.api_key.as_deref(),
         "zenmux" => cfg.zenmux.api_key.as_deref(),
         "vercel-ai-gateway" => cfg.vercel_gateway.api_key.as_deref(),
@@ -831,6 +839,7 @@ fn vendor_config_section(vendor: VendorId) -> &'static str {
         VendorId::OpenCodeGo => "opencode-go",
         VendorId::Tavily => "tavily",
         VendorId::Firecrawl => "firecrawl",
+        VendorId::Parallel => "parallel",
         VendorId::Requesty => "requesty",
         VendorId::ZenMux => "zenmux",
         VendorId::VercelGateway => "vercel-ai-gateway",
@@ -845,13 +854,18 @@ fn update_key(doc: &mut DocumentMut, section: &str, input: &KeyInput) -> Result<
     if !input.dirty {
         return Ok(());
     }
+    let key_name = if section == "parallel" {
+        "access_token"
+    } else {
+        "api_key"
+    };
     if input.buf.is_empty() {
         if let Some(table) = doc.get_mut(section).and_then(toml_edit::Item::as_table_mut) {
-            table.remove("api_key");
+            table.remove(key_name);
         }
         return Ok(());
     }
-    set_string(doc, section, "api_key", &input.buf)?;
+    set_string(doc, section, key_name, &input.buf)?;
     set_bool(doc, section, "enabled", true)
 }
 

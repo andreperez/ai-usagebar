@@ -26,6 +26,7 @@ defensive and includes opt-in live tests for catching response changes.
 | **OpenCode Go** | `opencode.ai/zen/go/v1/usage` | Rolling, weekly, and monthly `percent` windows with absolute reset timestamps | Yes |
 | **Tavily** | `api.tavily.com/usage` (documented; optional `X-Project-ID` header) | Plan billing-cycle used/limit (%), pay-as-you-go, this key's used/limit, per-endpoint breakdown (search/extract/crawl/map/research) | Yes |
 | **Firecrawl** | `api.firecrawl.dev/v2/team/credit-usage` + `/team/credit-usage/historical?byApiKey=false` (documented) | Remaining credits, plan credits, matching billing-period usage %, billing-period reset | Yes |
+| **Parallel** | `api.parallel.ai/account/service/v1/balance` (documented Account API) | Prepaid balance and pending debit, or invoice billing mode | Yes |
 | **Requesty** | `api-v2.requesty.ai/v1/manage/org` + `/org/usage?start=<RFC3339>&end=<RFC3339>&resolution=day` (documented) | Organization balance plus optional month-to-date spend, request, and token totals | Yes |
 | **ZenMux** | `zenmux.ai/api/v1/management/payg/balance` + `/subscription/detail` (documented Management API) | PAYG balance plus optional subscription 5h/7d quotas, status, and monthly cap | Yes |
 | **Vercel AI Gateway** | `ai-gateway.vercel.sh/v1/credits` + optional `/report` (documented REST API) | Credit balance, lifetime spend, and optional month-to-date reporting totals | Yes |
@@ -38,6 +39,7 @@ provider balance or quota refreshes.
 
 | Gateway | Endpoint | Authentication |
 |---|---|---|
+| Kilo Gateway | `GET api.kilo.ai/api/gateway/models` | Not required |
 | OpenRouter | `GET openrouter.ai/api/v1/models` | Not required |
 | Requesty | `GET router.requesty.ai/v1/models` | Optional `REQUESTY_API_KEY`; authenticated results honor organization approvals |
 | Vercel AI Gateway | `GET ai-gateway.vercel.sh/v1/models` | Not required |
@@ -61,6 +63,7 @@ upstream catalogs but are not collapsed into a misleading single price.
 | Kiro CLI | `GetUsageLimits` is the same undocumented CodeWhisperer operation used by kiro-cli's `/usage` command. AWS SSO OIDC `CreateToken`, used for refresh, is documented. |
 | Tavily | Documented `/usage` route with published OpenAPI schema. The `plan_limit`/`key.limit` fields are `null` for unlimited plans; the payload carries no reset timestamp. |
 | Firecrawl | Documented v2 billing routes. Historical usage is optional detail: a current-credit response remains usable when historical usage fails or has no unique matching period. The live API may return `creditsUsed` and a null `endDate`; the parser accepts those forms alongside the published `totalCredits` shape. |
+| Parallel | Documented Account API endpoint. Authenticates with the parallel-cli OAuth session (`~/.config/parallel-web-tools/auth.json`), refreshed via `platform.parallel.ai/getServiceKeys/token` with the rotated pair persisted back; data API keys are rejected (401). Invoice organizations intentionally show no prepaid balance. |
 | Requesty | Documented management routes. Organization balance is primary; ungrouped `usage` map aggregation is optional detail, so a 403 or transient usage failure retains the live balance with a sanitized warning. |
 | ZenMux | Documented Management API routes. PAYG and subscription responses are independent `success/data` envelopes; either valid block remains visible when the other fails. Standard inference keys are rejected, and `422` is a rate-limit diagnostic. |
 | Vercel AI Gateway | Credits are the primary 60-second fetch. Custom Reporting is opt-in, billed per query, and cached independently for six hours; its `403` plan restriction retains live credits and a sanitized warning. |

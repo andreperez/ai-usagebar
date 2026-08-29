@@ -82,8 +82,8 @@ let POINT_CRITICAL_MIN = 10
 // plus its spend-vs-limit bar. `cursor_total_pct` (27) is followed by the
 // Antigravity-only fourth-window fields (28-30) and the Z.AI MCP-tools pool
 // (31-33), which fills that same fourth-window slot. Requesty's balance (34),
-// ZenMux's PAYG balance (35), and Vercel AI Gateway's credit balance (36)
-// follow. A final literal sentinel
+// ZenMux's PAYG balance (35), Vercel AI Gateway's credit balance (36), and
+// Parallel's prepaid balance or invoice marker (37) follow. A final literal sentinel
 // absorbs the widget's stale suffix, preserving these fields.
 let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_reset};;" +
              "{sonnet_pct};;{sonnet_reset};;{extra_pct};;{extra_spent};;{extra_limit};;" +
@@ -93,7 +93,7 @@ let FORMAT = "{plan};;{session_pct};;{session_reset};;{weekly_pct};;{weekly_rese
              "{aapi_headline};;{aapi_pct};;{aapi_spent};;{aapi_limit};;{cursor_total_pct};;" +
              "{extra_model};;{extra_reset};;{extra_elapsed};;" +
              "{zai_mcp_pct};;{zai_mcp_reset};;{zai_mcp_elapsed};;" +
-             "{rqy_balance};;{zmx_payg};;{vag_balance}"
+              "{rqy_balance};;{zmx_payg};;{vag_balance};;{prl_balance}"
 
 let FORMAT_WITH_SENTINEL = FORMAT + ";;__aiub_end__"
 
@@ -467,6 +467,7 @@ func parse(_ text: String, vendor: String) -> Snapshot? {
     case "requesty": balanceFieldIndex = 34
     case "zenmux": balanceFieldIndex = 35
     case "vercel-ai-gateway": balanceFieldIndex = 36
+    case "parallel": balanceFieldIndex = 37
     default: balanceFieldIndex = nil
     }
     let balance = balanceFieldIndex.flatMap {
@@ -573,6 +574,9 @@ let VENDOR_AUTH: [VendorAuth] = [
     VendorAuth(id: "anthropic_api", name: "Anthropic API", kind: "apikey", cli: "", login: "", pkg: "", env: "ANTHROPIC_ADMIN_KEY"),
     VendorAuth(id: "tavily", name: "Tavily", kind: "apikey", cli: "", login: "", pkg: "", env: "TAVILY_API_KEY"),
     VendorAuth(id: "firecrawl", name: "Firecrawl", kind: "apikey", cli: "", login: "", pkg: "", env: "FIRECRAWL_API_KEY"),
+    // Parallel balance uses the parallel-cli OAuth session; the env var is
+    // only an optional Account API token override, never the data API key.
+    VendorAuth(id: "parallel", name: "Parallel", kind: "local", cli: "parallel-cli", login: "parallel-cli login", pkg: "", env: "PARALLEL_API_KEY"),
     VendorAuth(id: "requesty", name: "Requesty", kind: "apikey", cli: "", login: "", pkg: "", env: "REQUESTY_API_KEY"),
     VendorAuth(id: "zenmux", name: "ZenMux", kind: "apikey", cli: "", login: "", pkg: "", env: "ZENMUX_MANAGEMENT_API_KEY"),
     VendorAuth(id: "vercel-ai-gateway", name: "Vercel AI Gateway", kind: "apikey", cli: "", login: "", pkg: "", env: "AI_GATEWAY_API_KEY"),
@@ -600,8 +604,9 @@ func configPathTOML() -> String {
     return "\(NSHomeDirectory())/.config/ai-usagebar/config.toml"
 }
 
-func configHasApiKeyTOML(_ section: String) -> Bool {
-    guard let value = configValueTOML(section, "api_key") else { return false }
+func configHasCredentialTOML(_ section: String) -> Bool {
+    let key = section == "parallel" ? "access_token" : "api_key"
+    guard let value = configValueTOML(section, key) else { return false }
     return !value.isEmpty
 }
 
@@ -786,7 +791,8 @@ func configuredOverviewVendorIds() -> [String]? {
 }
 
 func apiKeyEnvironment(_ v: VendorAuth) -> String {
-    configValueTOML(v.id, "api_key_env") ?? v.env
+    let key = v.id == "parallel" ? "access_token_env" : "api_key_env"
+    return configValueTOML(v.id, key) ?? v.env
 }
 
 // ── Multi-account identities ───────────────────────────────────────────────
@@ -1190,8 +1196,16 @@ func vendorConfigured(_ v: VendorAuth) -> Bool {
                 return fm.fileExists(atPath: "\(home)/.gemini/\(d)", isDirectory: &isDir) && isDir.boolValue
             }
     }
+    if v.id == "parallel" {
+        // Configured == parallel-cli logged in (its OAuth session file exists),
+        // honoring a [parallel] credentials_path override like the binary. The
+        // env var / inline access_token fallback below still applies.
+        let storePath = configValueTOML("parallel", "credentials_path")
+            ?? "\(home)/.config/parallel-web-tools/auth.json"
+        if fm.fileExists(atPath: storePath) { return true }
+    }
     if let e = ProcessInfo.processInfo.environment[apiKeyEnvironment(v)], !e.isEmpty { return true }
-    return configHasApiKeyTOML(v.id)
+    return configHasCredentialTOML(v.id)
 }
 
 func cliInstalled(_ cli: String) -> Bool {
@@ -1317,6 +1331,9 @@ struct VendorsSection: View {
         if v.id == "antigravity" {
             return "⚠ Abra o Antigravity (app, IDE ou agy) e ative [antigravity] no config"
         }
+        if v.id == "parallel" {
+            return "⚠ Rode `parallel-cli login` e ative [parallel] no config"
+        }
         if v.kind == "local" {
             return "⚠ Entre no app Cursor e ative [cursor] no config"
         }
@@ -1330,6 +1347,7 @@ struct VendorsSection: View {
             return "Logar"
         }
         if v.id == "antigravity" { return "Abrir Antigravity" }
+        if v.id == "parallel" { return "Logar" }
         if v.kind == "local" { return "Abrir Cursor" }
         return "Configurar (TUI)"
     }
@@ -1337,6 +1355,9 @@ struct VendorsSection: View {
     private func action(_ v: VendorAuth) {
         if v.kind == "oauth" { runInTerminal(oauthScript(v)) }
         else if v.id == "antigravity" { openApp("Antigravity") }
+        else if v.id == "parallel" {
+            runInTerminal("if command -v parallel-cli >/dev/null 2>&1; then parallel-cli login; else echo \"parallel-cli nao encontrado (instale com: uv tool install parallel-web-tools)\"; fi\necho\nread -p \"Enter para fechar...\"")
+        }
         else if v.kind == "local" { openApp(v.name) }
         else { openTuiInTerminal() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { refresh() }

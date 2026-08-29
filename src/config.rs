@@ -59,10 +59,15 @@ pub struct Config {
     pub opencode_go: OpenCodeGoConfig,
     pub tavily: TavilyConfig,
     pub firecrawl: FirecrawlConfig,
+    pub parallel: ParallelConfig,
     pub requesty: RequestyConfig,
     pub zenmux: ZenMuxConfig,
     #[serde(rename = "vercel-ai-gateway")]
     pub vercel_gateway: VercelGatewayConfig,
+    /// Accepts configuration written by the removed provider without restoring
+    /// it to the runtime provider set.
+    #[serde(rename = "github-copilot", skip_serializing)]
+    pub ignored_removed_github_copilot_section: Option<toml::Value>,
 }
 
 /// UI / dispatch preferences: active providers control automatic refresh and
@@ -570,6 +575,42 @@ pub struct RequestyConfig {
     /// Inline key fallback. Config files containing this field are protected
     /// with mode 0600 on Unix.
     pub api_key: Option<String>,
+}
+
+/// Parallel Account API prepaid balance. Reads the parallel-cli OAuth session
+/// by default and refreshes it transparently; `PARALLEL_API_KEY` is honored
+/// only as an explicit Account API token override (JWT-shaped), never as the
+/// data API key the balance endpoint rejects.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ParallelConfig {
+    pub enabled: bool,
+    pub access_token_env: String,
+    pub access_token: Option<String>,
+    /// Overrides the parallel-cli credential store location
+    /// (`~/.config/parallel-web-tools/auth.json`).
+    pub credentials_path: Option<std::path::PathBuf>,
+}
+
+impl Default for ParallelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            access_token_env: "PARALLEL_API_KEY".to_string(),
+            access_token: None,
+            credentials_path: None,
+        }
+    }
+}
+
+impl ParallelConfig {
+    /// Credential store actually used: explicit override, else the parallel-cli
+    /// default. `None` when neither resolves (no home directory).
+    pub fn effective_credentials_path(&self) -> Option<std::path::PathBuf> {
+        self.credentials_path
+            .clone()
+            .or_else(|| crate::parallel::credentials::default_credentials_path().ok())
+    }
 }
 
 impl Default for RequestyConfig {
@@ -1175,6 +1216,7 @@ impl Config {
             VendorId::OpenCodeGo => self.opencode_go.enabled,
             VendorId::Tavily => self.tavily.enabled,
             VendorId::Firecrawl => self.firecrawl.enabled,
+            VendorId::Parallel => self.parallel.enabled,
             VendorId::Requesty => self.requesty.enabled,
             VendorId::ZenMux => self.zenmux.enabled,
             VendorId::VercelGateway => self.vercel_gateway.enabled,
@@ -1241,6 +1283,24 @@ impl Config {
                 &self.firecrawl.api_key_env,
                 self.firecrawl.api_key.as_deref(),
             ),
+            VendorId::Parallel => {
+                // A data API key in the env var is not a balance credential;
+                // only JWT-shaped values (or an inline override, or the
+                // parallel-cli store) make this provider configurable.
+                self.parallel
+                    .access_token
+                    .as_deref()
+                    .is_some_and(|k| !k.is_empty())
+                    || std::env::var(&self.parallel.access_token_env)
+                        .map(|value| {
+                            crate::parallel::credentials::looks_like_account_token(value.trim())
+                        })
+                        .unwrap_or(false)
+                    || self
+                        .parallel
+                        .effective_credentials_path()
+                        .is_some_and(|path| path.exists())
+            }
             VendorId::Requesty => {
                 env_or_inline(&self.requesty.api_key_env, self.requesty.api_key.as_deref())
             }
@@ -1585,6 +1645,19 @@ mod tests {
         assert!(!config.is_enabled(VendorId::ZenMux));
         assert_eq!(config.zenmux.api_key_env, "ZENMUX_MANAGEMENT_API_KEY");
         assert!(config.zenmux.api_key.is_none());
+    }
+
+    #[test]
+    fn removed_github_copilot_section_is_ignored() {
+        let file = write_toml(
+            r#"
+            [github-copilot]
+            enabled = true
+            token_env = "GITHUB_TOKEN"
+            "#,
+        );
+        let config = Config::load_from(file.path()).unwrap();
+        assert!(config.ignored_removed_github_copilot_section.is_some());
     }
 
     #[test]

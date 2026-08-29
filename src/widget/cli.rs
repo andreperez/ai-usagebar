@@ -310,6 +310,7 @@ pub enum Vendor {
     OpenCodeGo,
     Tavily,
     Firecrawl,
+    Parallel,
     Requesty,
     #[value(name = "zenmux")]
     ZenMux,
@@ -340,6 +341,7 @@ impl Vendor {
             Vendor::OpenCodeGo => crate::vendor::VendorId::OpenCodeGo,
             Vendor::Tavily => crate::vendor::VendorId::Tavily,
             Vendor::Firecrawl => crate::vendor::VendorId::Firecrawl,
+            Vendor::Parallel => crate::vendor::VendorId::Parallel,
             Vendor::Requesty => crate::vendor::VendorId::Requesty,
             Vendor::ZenMux => crate::vendor::VendorId::ZenMux,
             Vendor::VercelGateway => crate::vendor::VendorId::VercelGateway,
@@ -435,6 +437,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::OpenCodeGo => Vendor::OpenCodeGo,
         crate::vendor::VendorId::Tavily => Vendor::Tavily,
         crate::vendor::VendorId::Firecrawl => Vendor::Firecrawl,
+        crate::vendor::VendorId::Parallel => Vendor::Parallel,
         crate::vendor::VendorId::Requesty => Vendor::Requesty,
         crate::vendor::VendorId::ZenMux => Vendor::ZenMux,
         crate::vendor::VendorId::VercelGateway => Vendor::VercelGateway,

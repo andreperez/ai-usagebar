@@ -285,6 +285,12 @@ func testParserBalances() {
     assertEqual(vag?.creditBalance, "$95.50", "vercel credit balance value")
     assertEqual(vag?.hasUsageWindows, false, "vercel suppresses 5h/7d windows")
 
+    // Parallel: prepaid balance or invoice marker at 37.
+    let prl = snapshot(FORMAT, vendor: "parallel",
+                       fields: fields(through: 37, set: [37: "$12.50"]))
+    assertEqual(prl?.creditBalance, "$12.50", "parallel prepaid balance value")
+    assertEqual(prl?.hasUsageWindows, false, "parallel suppresses 5h/7d windows")
+
     // Anthropic API with a monthly limit → spend-vs-limit bar, no duplicate
     // session/weekly, and no headline balance (the bar replaces it).
     let aapiLimit = snapshot(FORMAT, vendor: "anthropic_api",

@@ -324,6 +324,17 @@ enabled = false
 api_key_env = "FIRECRAWL_API_KEY"
 # api_key = "fc-..."              # fallback; chmod 600 the file if you use it
 
+# Parallel — organization prepaid balance from the documented Account API.
+# Reads the OAuth session that `parallel-cli login` wrote and refreshes the
+# short-lived access token automatically, persisting the rotated pair back so
+# the CLI login stays valid. PARALLEL_API_KEY is honored only when it holds a
+# JWT-shaped Account API token; data API keys are rejected by the endpoint.
+[parallel]
+enabled = false
+access_token_env = "PARALLEL_API_KEY"
+# access_token = "..."             # fallback override; chmod 600 the file if you use it
+# credentials_path = "..."         # default: ~/.config/parallel-web-tools/auth.json
+
 # Requesty — organization balance & usage from the documented management API.
 # Opt-in; disabled until you set a key (env var or inline). The API
 # authenticates with a Bearer token from REQUESTY_API_KEY and has no extra

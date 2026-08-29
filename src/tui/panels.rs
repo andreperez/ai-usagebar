@@ -217,6 +217,20 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
                 .unwrap_or_else(|| ("—".into(), PaceSeverity::Low));
             ("Firecrawl".into(), vec![cell])
         }
+        VendorSnapshot::Parallel(s) => (
+            if s.will_invoice {
+                "Parallel invoice"
+            } else {
+                "Parallel prepaid"
+            }
+            .into(),
+            vec![(
+                s.prepaid_balance()
+                    .map(crate::format::usd)
+                    .unwrap_or_else(|| "Invoice".into()),
+                crate::parallel::vendor::severity(s),
+            )],
+        ),
         VendorSnapshot::Requesty(s) => (
             s.org_name.clone(),
             vec![(
@@ -326,6 +340,7 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         | VendorSnapshot::Novita(_)
         | VendorSnapshot::Moonshot(_)
         | VendorSnapshot::Grok(_)
+        | VendorSnapshot::Parallel(_)
         | VendorSnapshot::Requesty(_) => None,
     }
 }
@@ -389,6 +404,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::OpenCodeGo(s) => opencode_go_sections(s, now),
                 VendorSnapshot::Tavily(s) => tavily_sections(s),
                 VendorSnapshot::Firecrawl(s) => firecrawl_sections(s, now),
+                VendorSnapshot::Parallel(s) => parallel_sections(s),
                 VendorSnapshot::Requesty(s) => requesty_sections(s),
                 VendorSnapshot::ZenMux(s) => zenmux_sections(s, now),
                 VendorSnapshot::VercelGateway(s) => vercel_gateway_sections(s),
@@ -1303,6 +1319,30 @@ fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
                 s.interval_start.to_rfc3339(),
                 s.interval_end.to_rfc3339()
             ),
+        });
+    }
+    sections
+}
+
+fn parallel_sections(s: &crate::usage::ParallelSnapshot) -> SectionBuilder {
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: "Parallel".into(),
+        right: None,
+    }]);
+    sections.push(Section::Spacer);
+    if s.will_invoice {
+        sections.push(Section::Text {
+            label: "Billing mode".into(),
+            value: "Invoice".into(),
+        });
+    } else {
+        sections.push(Section::Text {
+            label: "Prepaid balance".into(),
+            value: crate::format::usd(s.prepaid_balance().unwrap_or_default()),
+        });
+        sections.push(Section::Text {
+            label: "Pending debit".into(),
+            value: crate::format::usd(s.pending_debit().unwrap_or_default()),
         });
     }
     sections

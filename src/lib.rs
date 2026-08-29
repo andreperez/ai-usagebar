@@ -40,6 +40,7 @@ pub mod opencode_go;
 pub mod openrouter;
 pub mod pacing;
 pub mod pango;
+pub mod parallel;
 pub mod prices;
 pub mod report;
 pub mod requesty;

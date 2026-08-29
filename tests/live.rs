@@ -69,6 +69,7 @@ use ai_usagebar::kiro;
 use ai_usagebar::minimax;
 use ai_usagebar::openai;
 use ai_usagebar::openrouter;
+use ai_usagebar::parallel;
 use ai_usagebar::requesty;
 use ai_usagebar::supergrok;
 use ai_usagebar::tavily;
@@ -492,6 +493,44 @@ async fn requesty_live() {
         out.snapshot.balance,
         out.snapshot.usage.is_some()
     );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn parallel_live() {
+    let cache = xdg_cache_for("parallel");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoints = parallel::fetch::Endpoints::default();
+    // Uses the parallel-cli OAuth session (with transparent refresh); a
+    // JWT-shaped PARALLEL_API_KEY overrides it. A plain data API key is not a
+    // balance credential and is deliberately skipped.
+    let explicit = parallel::credentials::explicit_override(None, "PARALLEL_API_KEY");
+    let store = parallel::credentials::default_credentials_path().ok();
+    let has_credential = explicit.is_some() || store.as_ref().is_some_and(|p| p.exists());
+    if !has_credential {
+        eprintln!(
+            "parallel_live: no parallel-cli login and no account token — skipping optional Parallel smoke test"
+        );
+        return;
+    }
+    let credential = parallel::credentials::resolve_token(
+        &client,
+        explicit.as_deref(),
+        store.as_deref(),
+        &endpoints.token,
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("Parallel credential should resolve against the real store");
+    let out = parallel::fetch_snapshot(&client, &credential, &cache, &endpoints, Duration::ZERO)
+        .await
+        .expect("Parallel balance fetch should succeed against the real API");
+    assert!(out.snapshot.credit_balance_cents.is_finite());
+    assert!(out.snapshot.pending_debit_balance_cents.is_finite());
+    println!("parallel — invoice={}", out.snapshot.will_invoice);
 }
 
 #[tokio::test]

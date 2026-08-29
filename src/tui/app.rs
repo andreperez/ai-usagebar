@@ -834,6 +834,32 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
                     .await?;
             Ok(outcome.into())
         }
+        VendorId::Parallel => {
+            let cache = crate::cache::Cache::for_vendor("parallel")?;
+            let endpoints = crate::parallel::fetch::Endpoints::default();
+            let explicit = crate::parallel::credentials::explicit_override(
+                config.parallel.access_token.as_deref(),
+                &config.parallel.access_token_env,
+            );
+            let store = config.parallel.effective_credentials_path();
+            let credential = crate::parallel::credentials::resolve_token(
+                client,
+                explicit.as_deref(),
+                store.as_deref(),
+                &endpoints.token,
+                Utc::now(),
+            )
+            .await?;
+            Ok(crate::parallel::fetch_snapshot(
+                client,
+                &credential,
+                &cache,
+                &endpoints,
+                DEFAULT_TTL,
+            )
+            .await?
+            .into())
+        }
         VendorId::Requesty => {
             let api_key = crate::config::resolve_api_key(
                 "Requesty",

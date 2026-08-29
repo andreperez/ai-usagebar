@@ -147,6 +147,17 @@ enabled = true             # disabled by default; enable once you add an API key
 api_key_env = "FIRECRAWL_API_KEY"
 # api_key = "fc-..."       # used if FIRECRAWL_API_KEY is unset; chmod 600 the file!
 
+[parallel]
+enabled = true             # disabled by default; reads the parallel-cli OAuth session
+access_token_env = "PARALLEL_API_KEY"  # override env; must hold a JWT-shaped Account API token
+# access_token = "..."     # optional explicit Account API token override
+# credentials_path = "..." # default: ~/.config/parallel-web-tools/auth.json
+# Run `parallel-cli login` once. Access tokens live ~7 minutes, so ai-usagebar
+# refreshes them via platform.parallel.ai and writes the rotated pair back.
+# PARALLEL_API_KEY only counts when it holds a JWT-shaped Account API token;
+# data API keys are rejected by the balance endpoint. Invoice organizations
+# show billing mode rather than a fabricated zero prepaid balance.
+
 [requesty]
 enabled = true             # disabled by default; enable once you add a management API key
 api_key_env = "REQUESTY_API_KEY"
