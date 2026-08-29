@@ -65,18 +65,7 @@ returns organization-level `credit_balance_cents`,
 - [x] Add scoped cache, widget, TUI, `usage --json`, Settings, desktop adapters,
   tests, docs, and an ignored live smoke test.
 
-### 4. Context7 Library Metrics
-
-**Viable with explicit scope.** `GET /v2/libs/metrics` requires an API key and
-a teamspace-owned `libraryId`; it reports per-library lifetime and daily
-request counters, not the teamspace's billing total.
-
-- Require `CONTEXT7_API_KEY` and `[context7] library_id`.
-- Show cumulative request counts and recent daily counts as informational text.
-- Never represent library metrics as team billing, plan quota, or remaining
-  credits.
-
-### 5. Ollama Local Runtime
+### 4. Ollama Local Runtime
 
 **Viable as availability/inventory, not billing.** The local API has no
 authentication and exposes installed/running models. Per-request token metrics
@@ -89,6 +78,7 @@ generation just to create usage data.
 ## Deferred Pending Official Read-Only Account APIs
 
 | Provider | Current blocker |
+| Context7 | The public API exposes only `libraryId`-scoped request metrics. Teamspace credits, remaining quota, and aggregate cost remain dashboard-only. |
 |---|---|
 | GitHub Copilot | User billing endpoints expose only personally billed subscriptions. Organization or enterprise billing requires a separately configured administrator or billing-manager scope, which does not serve the current account. |
 | OpenCode Zen | Documented API-key endpoint reports Go subscription windows; no public API-key balance endpoint for Zen PAYG credits. Existing `opencode-go` already covers that separate subscription endpoint. |
