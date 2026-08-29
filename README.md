@@ -663,6 +663,10 @@ make clippy                                        # cargo clippy -D warnings
 - `r` — refresh active tab
 - `R` — refresh all tabs
 - `s` — open Settings overlay (primary vendor + Dashboard providers + API keys)
+- `p` — open the full-screen model-price browser; type immediately to filter
+  exact model IDs, `Backspace` clears text, `↑` / `↓`, `PgUp` / `PgDn`,
+  `Home` / `End`, or the mouse wheel scroll model families, and `Esc` returns
+  to the dashboard
 - `c` — open local Claude context sessions (only when `[context] enabled = true`); `v` cycles its layout
 - `q` / `Esc` / `Ctrl-C` — quit
 

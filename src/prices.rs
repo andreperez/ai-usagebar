@@ -51,6 +51,7 @@ struct Comparison<'a> {
     output_winner: Gateway,
     overall_winner: Option<Gateway>,
     overall_tied: bool,
+    overall_winners: Vec<Gateway>,
     prices: Vec<PriceRow<'a>>,
 }
 
@@ -175,6 +176,9 @@ pub struct PriceComparison {
     pub output_winner: Gateway,
     pub overall_winner: Option<Gateway>,
     pub overall_tied: bool,
+    /// Gateways with the same dominant input/output pair. A tie can include
+    /// every gateway (identical prices) or only a cheaper subset.
+    pub overall_winners: Vec<Gateway>,
     pub prices: Vec<PriceRowOwned>,
 }
 
@@ -193,6 +197,7 @@ fn owned(comparison: Comparison<'_>) -> PriceComparison {
         output_winner: comparison.output_winner,
         overall_winner: comparison.overall_winner,
         overall_tied: comparison.overall_tied,
+        overall_winners: comparison.overall_winners,
         prices: comparison
             .prices
             .into_iter()
@@ -349,26 +354,21 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
         .iter()
         .min_by(|a, b| a.output_per_token.total_cmp(&b.output_per_token))?
         .gateway;
-    let dominant = matching
+    let overall_winners: Vec<_> = matching
         .iter()
-        .find(|candidate| {
+        .filter(|candidate| {
             matching.iter().all(|other| {
                 candidate.input_per_token <= other.input_per_token
                     && candidate.output_per_token <= other.output_per_token
             })
         })
-        .copied();
-    let overall_tied = dominant.is_some_and(|candidate| {
-        matching.iter().any(|other| {
-            other.gateway != candidate.gateway
-                && other.input_per_token == candidate.input_per_token
-                && other.output_per_token == candidate.output_per_token
-        })
-    });
-    let overall_winner = if overall_tied {
-        None
+        .map(|price| price.gateway)
+        .collect();
+    let overall_tied = overall_winners.len() > 1;
+    let overall_winner = if overall_winners.len() == 1 {
+        Some(overall_winners[0])
     } else {
-        dominant.map(|price| price.gateway)
+        None
     };
     let model_id = &matching[0].model_id;
     Some(Comparison {
@@ -377,6 +377,7 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
         output_winner,
         overall_winner,
         overall_tied,
+        overall_winners,
         prices: matching
             .into_iter()
             .map(|price| PriceRow {
@@ -451,6 +452,23 @@ mod tests {
         let comparison = compare(&prices, "openai/gpt-test").unwrap();
         assert_eq!(comparison.overall_winner, None);
         assert!(comparison.overall_tied);
+        assert_eq!(comparison.overall_winners.len(), comparison.prices.len());
+    }
+
+    #[test]
+    fn partial_equal_best_values_keep_every_winner() {
+        let prices = [
+            price(Gateway::KiloGateway, 2e-6, 6e-6),
+            price(Gateway::OpenRouter, 2e-6, 6e-6),
+            price(Gateway::VercelAiGateway, 3e-6, 7e-6),
+        ];
+        let comparison = compare(&prices, "openai/gpt-test").unwrap();
+        assert_eq!(comparison.overall_winner, None);
+        assert!(comparison.overall_tied);
+        assert_eq!(
+            comparison.overall_winners,
+            vec![Gateway::KiloGateway, Gateway::OpenRouter]
+        );
     }
 
     #[test]

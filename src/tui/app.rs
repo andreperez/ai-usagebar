@@ -33,6 +33,58 @@ pub enum PricePanelState {
     Error(String),
 }
 
+/// Full-screen model-price route. Catalog loading stays separate from the
+/// regular provider refresh cycle, while query and scroll state remain local
+/// to this route so reopening the dashboard never changes selected vendors.
+#[derive(Debug, Clone)]
+pub struct PriceScreenState {
+    pub load: PricePanelState,
+    pub query: String,
+    /// First matching model-family index to render.
+    pub scroll: usize,
+}
+
+impl PriceScreenState {
+    pub fn loading() -> Self {
+        Self {
+            load: PricePanelState::Loading,
+            query: String::new(),
+            scroll: 0,
+        }
+    }
+
+    pub fn matching_comparisons(&self) -> Vec<&crate::prices::PriceComparison> {
+        let query = self.query.trim().to_ascii_lowercase();
+        let PricePanelState::Ready(comparisons) = &self.load else {
+            return Vec::new();
+        };
+        comparisons
+            .iter()
+            .filter(|comparison| {
+                query.is_empty() || comparison.model_id.to_ascii_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
+    pub fn scroll_by(&mut self, delta: isize) {
+        let count = self.matching_comparisons().len();
+        self.scroll = if delta.is_negative() {
+            self.scroll.saturating_sub(delta.unsigned_abs())
+        } else {
+            self.scroll.saturating_add(delta as usize)
+        }
+        .min(count.saturating_sub(1));
+    }
+
+    pub fn reset_scroll(&mut self) {
+        self.scroll = 0;
+    }
+
+    pub fn scroll_to_end(&mut self) {
+        self.scroll = self.matching_comparisons().len().saturating_sub(1);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ReadyTab {
     pub snapshot: crate::usage::VendorSnapshot,
@@ -202,6 +254,9 @@ pub struct HitTargets {
     /// Settings overlay interactive rows: key fields and the save row, plus
     /// the collapsed "More providers" header.
     pub settings_rows: Vec<(SettingsRow, Rect)>,
+    /// Search field and scrollable list on the full-screen price route.
+    pub price_search: Option<Rect>,
+    pub price_list: Option<Rect>,
 }
 
 /// What a click in the vendor navigation selects.
@@ -241,9 +296,9 @@ pub struct App {
     pub quit: bool,
     /// When `Some`, the Settings overlay is open and consuming key events.
     pub settings: Option<crate::tui::settings::SettingsState>,
-    /// On-demand price catalog comparison. It remains separate from provider
-    /// tabs so periodic quota refreshes never trigger catalog downloads.
-    pub prices: Option<PricePanelState>,
+    /// On-demand price catalog route. It remains separate from provider tabs
+    /// so periodic quota refreshes never trigger catalog downloads.
+    pub prices: Option<PriceScreenState>,
     /// Local context monitoring is separately opt-in and never changes the
     /// vendor tab set.
     pub context_enabled: bool,
@@ -952,6 +1007,54 @@ pub fn refresh_stagger(tabs: &[TabId], step: Duration) -> Vec<Duration> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    fn price_comparison(model_id: &str) -> crate::prices::PriceComparison {
+        use crate::prices::{Gateway, PriceRowOwned};
+
+        crate::prices::PriceComparison {
+            model_id: model_id.into(),
+            input_winner: Gateway::KiloGateway,
+            output_winner: Gateway::VercelAiGateway,
+            overall_winner: None,
+            overall_tied: false,
+            overall_winners: vec![],
+            prices: vec![
+                PriceRowOwned {
+                    gateway: Gateway::KiloGateway,
+                    input_per_million: 1.0,
+                    output_per_million: 5.0,
+                    model_id: model_id.into(),
+                },
+                PriceRowOwned {
+                    gateway: Gateway::VercelAiGateway,
+                    input_per_million: 2.0,
+                    output_per_million: 4.0,
+                    model_id: model_id.into(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn price_screen_filters_models_and_clamps_scroll() {
+        let mut screen = PriceScreenState {
+            load: PricePanelState::Ready(vec![
+                price_comparison("anthropic/claude-sonnet"),
+                price_comparison("openai/gpt-test"),
+                price_comparison("anthropic/claude-opus"),
+            ]),
+            query: "claude".into(),
+            scroll: 0,
+        };
+        assert_eq!(screen.matching_comparisons().len(), 2);
+        screen.scroll_by(99);
+        assert_eq!(screen.scroll, 1);
+        screen.scroll_by(-99);
+        assert_eq!(screen.scroll, 0);
+        screen.query = "missing".into();
+        screen.scroll_by(1);
+        assert_eq!(screen.scroll, 0);
+    }
 
     // Use `App::with_theme(.., Theme::default())` rather than `App::new`, which
     // would read the real Omarchy theme file + `$HOME`. The tab-selection logic

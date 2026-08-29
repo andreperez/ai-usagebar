@@ -18,8 +18,8 @@ use std::time::{Duration, SystemTime};
 
 use ai_usagebar::config::Config;
 use ai_usagebar::tui::app::{
-    ANTHROPIC_REFRESH_STAGGER, App, FooterAction, PricePanelState, REFRESH_INTERVAL, TabId,
-    TabState, refresh_one, refresh_stagger, tabs_with_desktop,
+    ANTHROPIC_REFRESH_STAGGER, App, FooterAction, PricePanelState, PriceScreenState,
+    REFRESH_INTERVAL, TabId, TabState, refresh_one, refresh_stagger, tabs_with_desktop,
 };
 use ai_usagebar::tui::view::draw;
 use ai_usagebar::vendor::HTTP_CLIENT_TIMEOUT;
@@ -260,10 +260,13 @@ where
                 }
             }
             Some(result) = prices_rx.recv() => {
-                app.prices = Some(match result {
-                    Ok(comparisons) => PricePanelState::Ready(comparisons),
-                    Err(error) => PricePanelState::Error(error),
-                });
+                if let Some(screen) = app.prices.as_mut() {
+                    screen.load = match result {
+                        Ok(comparisons) => PricePanelState::Ready(comparisons),
+                        Err(error) => PricePanelState::Error(error),
+                    };
+                    screen.reset_scroll();
+                }
             }
             // Periodic auto-refresh of all tabs.
             _ = tick.tick() => {
@@ -357,8 +360,8 @@ where
                         }
                         continue;
                     }
-                    if app.prices.is_some() {
-                        if matches!(k.code, KeyCode::Esc | KeyCode::Char('p')) {
+                    if let Some(screen) = app.prices.as_mut() {
+                        if handle_price_key(screen, k.code, k.modifiers) {
                             app.prices = None;
                         }
                         continue;
@@ -385,7 +388,7 @@ where
                         continue;
                     }
                     if matches!(k.code, KeyCode::Char('p')) {
-                        app.prices = Some(PricePanelState::Loading);
+                        app.prices = Some(PriceScreenState::loading());
                         let prices_tx = prices_tx.clone();
                         tokio::spawn(async move {
                             let result = ai_usagebar::prices::load_comparisons(None)
@@ -559,6 +562,57 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     }
 }
 
+/// Handle navigation and filtering on the full-screen price route. Scrolling
+/// is by comparable model family rather than terminal row, so a long gateway
+/// list stays together while users move through it.
+fn handle_price_key(screen: &mut PriceScreenState, code: KeyCode, modifiers: KeyModifiers) -> bool {
+    let has_modifier = modifiers.intersects(
+        KeyModifiers::CONTROL
+            | KeyModifiers::ALT
+            | KeyModifiers::SUPER
+            | KeyModifiers::HYPER
+            | KeyModifiers::META,
+    );
+    match code {
+        KeyCode::Esc => true,
+        KeyCode::Backspace => {
+            screen.query.pop();
+            screen.reset_scroll();
+            false
+        }
+        KeyCode::Char(character) if !has_modifier => {
+            screen.query.push(character);
+            screen.reset_scroll();
+            false
+        }
+        KeyCode::Up => {
+            screen.scroll_by(-1);
+            false
+        }
+        KeyCode::Down => {
+            screen.scroll_by(1);
+            false
+        }
+        KeyCode::PageUp => {
+            screen.scroll_by(-8);
+            false
+        }
+        KeyCode::PageDown => {
+            screen.scroll_by(8);
+            false
+        }
+        KeyCode::Home => {
+            screen.reset_scroll();
+            false
+        }
+        KeyCode::End => {
+            screen.scroll_to_end();
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Hit-test a mouse click against the rects the last draw recorded. Returns an
 /// action only when the event needs work from the event loop; focus and tab
 /// selection mutate `app` directly.
@@ -566,6 +620,15 @@ fn handle_mouse(app: &mut App, m: &event::MouseEvent) -> Option<MouseAction> {
     use ai_usagebar::tui::settings::{Focus as SFocus, SettingsRow};
     use ratatui::layout::Position;
 
+    if let Some(screen) = app.prices.as_mut() {
+        match m.kind {
+            MouseEventKind::ScrollUp => screen.scroll_by(-1),
+            MouseEventKind::ScrollDown => screen.scroll_by(1),
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => {}
+        }
+        return None;
+    }
     if m.kind != MouseEventKind::Down(MouseButton::Left) {
         return None;
     }
@@ -703,6 +766,104 @@ mod tests {
             KeyModifiers::CONTROL
         ));
         assert!(app.quit);
+    }
+
+    #[test]
+    fn price_screen_accepts_search_and_keyboard_scroll() {
+        use ai_usagebar::prices::{Gateway, PriceComparison, PriceRowOwned};
+
+        let comparison = |id: &str| PriceComparison {
+            model_id: id.into(),
+            input_winner: Gateway::KiloGateway,
+            output_winner: Gateway::KiloGateway,
+            overall_winner: Some(Gateway::KiloGateway),
+            overall_tied: false,
+            overall_winners: vec![Gateway::KiloGateway],
+            prices: vec![PriceRowOwned {
+                gateway: Gateway::KiloGateway,
+                input_per_million: 1.0,
+                output_per_million: 1.0,
+                model_id: id.into(),
+            }],
+        };
+        let mut screen = PriceScreenState {
+            load: PricePanelState::Ready(vec![
+                comparison("anthropic/claude-sonnet"),
+                comparison("openai/gpt-test"),
+            ]),
+            query: String::new(),
+            scroll: 0,
+        };
+        handle_price_key(&mut screen, KeyCode::Char('c'), KeyModifiers::NONE);
+        handle_price_key(&mut screen, KeyCode::Char('l'), KeyModifiers::NONE);
+        assert_eq!(screen.query, "cl");
+        assert_eq!(screen.matching_comparisons().len(), 1);
+        assert!(!handle_price_key(
+            &mut screen,
+            KeyCode::Char('p'),
+            KeyModifiers::NONE
+        ));
+        assert_eq!(screen.query, "clp");
+        screen.query = "cl".into();
+        handle_price_key(&mut screen, KeyCode::End, KeyModifiers::NONE);
+        assert_eq!(screen.scroll, 0);
+        screen.query.clear();
+        handle_price_key(&mut screen, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(screen.scroll, 1);
+        assert!(handle_price_key(
+            &mut screen,
+            KeyCode::Esc,
+            KeyModifiers::NONE
+        ));
+    }
+
+    #[test]
+    fn price_screen_mouse_wheel_scrolls_families() {
+        use ai_usagebar::prices::{Gateway, PriceComparison, PriceRowOwned};
+
+        let mut app = app_with_two();
+        app.prices = Some(PriceScreenState {
+            load: PricePanelState::Ready(vec![
+                PriceComparison {
+                    model_id: "one/model".into(),
+                    input_winner: Gateway::KiloGateway,
+                    output_winner: Gateway::KiloGateway,
+                    overall_winner: Some(Gateway::KiloGateway),
+                    overall_tied: false,
+                    overall_winners: vec![Gateway::KiloGateway],
+                    prices: vec![PriceRowOwned {
+                        gateway: Gateway::KiloGateway,
+                        input_per_million: 1.0,
+                        output_per_million: 1.0,
+                        model_id: "one/model".into(),
+                    }],
+                },
+                PriceComparison {
+                    model_id: "two/model".into(),
+                    input_winner: Gateway::KiloGateway,
+                    output_winner: Gateway::KiloGateway,
+                    overall_winner: Some(Gateway::KiloGateway),
+                    overall_tied: false,
+                    overall_winners: vec![Gateway::KiloGateway],
+                    prices: vec![PriceRowOwned {
+                        gateway: Gateway::KiloGateway,
+                        input_per_million: 1.0,
+                        output_per_million: 1.0,
+                        model_id: "two/model".into(),
+                    }],
+                },
+            ]),
+            query: String::new(),
+            scroll: 0,
+        });
+        let wheel = event::MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 1,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(handle_mouse(&mut app, &wheel).is_none());
+        assert_eq!(app.prices.as_ref().unwrap().scroll, 1);
     }
 
     #[test]

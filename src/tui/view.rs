@@ -2,10 +2,11 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui_bubbletea_components::{Help, KeyBinding, ListItem, SelectList};
+use ratatui_bubbletea_theme::BubbleTheme;
 
 use crate::format::local_time_hms;
 use crate::tui::app::TabId;
@@ -55,11 +56,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Settings still floats on top of everything.
     let mut hit = app.hit.borrow_mut();
     hit.settings_rows.clear();
+    hit.price_search = None;
+    hit.price_list = None;
     if let Some(s) = &app.settings {
         crate::tui::settings::render(f, f.area(), s, &app.theme, &mut hit.settings_rows);
-    }
-    if let Some(state) = &app.prices {
-        draw_prices(f, f.area(), state, &app.theme);
     }
 }
 
@@ -69,6 +69,10 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
     use crate::config::ContextLayout;
     use crate::tui::context;
 
+    if app.prices.is_some() {
+        draw_prices(f, app, area);
+        return;
+    }
     let Some(state) = &app.context else {
         draw_main(f, app, area);
         return;
@@ -129,7 +133,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let active = if app.overview {
+    let active = if app.prices.is_some() {
+        "Model prices".to_string()
+    } else if app.overview {
         "Overview".to_string()
     } else {
         app.active_tab_id()
@@ -424,45 +430,67 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // title row of every panel, and (b) prone to getting cropped on narrow
     // 875x600 windows. Keep the footer to just the keybinding hints.
     let theme = bubble_theme(&app.theme);
-    let mut bindings = vec![
-        FooterBinding {
-            action: None,
-            key: "tab/h/l",
-            description: "switch",
-        },
-        FooterBinding {
-            action: None,
-            key: "p",
-            description: "prices",
-        },
-        FooterBinding {
-            action: Some(FooterAction::Refresh),
-            key: "r",
-            description: "refresh",
-        },
-        FooterBinding {
-            action: Some(FooterAction::RefreshAll),
-            key: "R",
-            description: "refresh all",
-        },
-        FooterBinding {
-            action: Some(FooterAction::Settings),
-            key: "s",
-            description: "settings",
-        },
-    ];
-    if app.context_enabled {
+    let mut bindings = if app.prices.is_some() {
+        vec![
+            FooterBinding {
+                action: None,
+                key: "type",
+                description: "search",
+            },
+            FooterBinding {
+                action: None,
+                key: "↑↓/PgUp/PgDn/wheel",
+                description: "scroll",
+            },
+            FooterBinding {
+                action: None,
+                key: "Esc",
+                description: "back",
+            },
+        ]
+    } else {
+        vec![
+            FooterBinding {
+                action: None,
+                key: "tab/h/l",
+                description: "switch",
+            },
+            FooterBinding {
+                action: None,
+                key: "p",
+                description: "prices",
+            },
+            FooterBinding {
+                action: Some(FooterAction::Refresh),
+                key: "r",
+                description: "refresh",
+            },
+            FooterBinding {
+                action: Some(FooterAction::RefreshAll),
+                key: "R",
+                description: "refresh all",
+            },
+            FooterBinding {
+                action: Some(FooterAction::Settings),
+                key: "s",
+                description: "settings",
+            },
+        ]
+    };
+    if app.prices.is_none() && app.context_enabled {
         bindings.push(FooterBinding {
             action: None,
             key: "c",
             description: "context",
         });
     }
-    bindings.push(FooterBinding {
-        action: Some(FooterAction::Quit),
-        key: "q/esc",
-        description: "quit",
-    });
+    if app.prices.is_none() {
+        bindings.push(FooterBinding {
+            action: Some(FooterAction::Quit),
+            key: "q/esc",
+            description: "quit",
+        });
+    }
     let help = Help::new(
         bindings
             .iter()
@@ -493,19 +521,49 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     app.hit.borrow_mut().footer_actions = actions;
 }
 
-fn draw_prices(f: &mut Frame, area: Rect, state: &PricePanelState, theme: &crate::theme::Theme) {
-    let bubble = bubble_theme(theme);
-    let modal = crate::tui::settings::centered_rect(88, 84, area);
-    let block = bubble.titled_modal_block(" Model prices ");
-    let inner = block.inner(modal);
-    f.render_widget(block, modal);
-    let mut lines = vec![
-        Line::from(bubble.muted(
-            " Exact model IDs only · base input/output USD per million tokens · Esc closes",
-        )),
-        Line::from(""),
-    ];
-    match state {
+fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
+    let Some(state) = &app.prices else {
+        return;
+    };
+    let bubble = bubble_theme(&app.theme);
+    let block = bubble.titled_block(" Model prices ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(inner);
+    let search_width = inner.width.min(56);
+    let search_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(search_width), Constraint::Min(0)])
+        .split(chunks[0]);
+    let search_block = Block::default()
+        .title(" model search ")
+        .borders(Borders::ALL)
+        .border_style(bubble.focused_border);
+    let search_inner = search_block.inner(search_row[0]);
+    f.render_widget(search_block, search_row[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("{} _", state.query),
+            bubble.selected.add_modifier(Modifier::BOLD),
+        ))),
+        search_inner,
+    );
+    f.render_widget(
+        Paragraph::new(bubble.muted(" type to filter exact model IDs · arrows or wheel scroll")),
+        search_row[1],
+    );
+    {
+        let mut hit = app.hit.borrow_mut();
+        hit.price_search = Some(search_row[0]);
+        hit.price_list = Some(chunks[1]);
+    }
+    let mut lines = vec![Line::from(bubble.muted(
+        " Type to filter exact model IDs · arrows or wheel scroll · bold green values are cheapest in this family",
+    ))];
+    match &state.load {
         PricePanelState::Loading => lines.push(Line::from(
             bubble.muted(" Loading public model catalogs..."),
         )),
@@ -516,36 +574,80 @@ fn draw_prices(f: &mut Frame, area: Rect, state: &PricePanelState, theme: &crate
         PricePanelState::Ready(comparisons) if comparisons.is_empty() => lines.push(Line::from(
             bubble.muted(" No exact model IDs are available from two or more catalogs."),
         )),
-        PricePanelState::Ready(comparisons) => {
-            for comparison in comparisons.iter().take(24) {
-                let overall = match comparison.overall_winner {
-                    Some(gateway) => gateway.label(),
-                    None if comparison.overall_tied => "tie",
-                    None => "input/output tradeoff",
-                };
-                lines.push(Line::from(Span::styled(
-                    comparison.model_id.clone(),
-                    bubble.focused_border,
-                )));
-                lines.push(Line::from(format!(
-                    "   input {} · output {} · overall {}",
-                    comparison.input_winner.label(),
-                    comparison.output_winner.label(),
-                    overall
-                )));
-                for price in &comparison.prices {
-                    lines.push(Line::from(format!(
-                        "   {:<20} ${:.4}/M input · ${:.4}/M output",
-                        price.gateway.label(),
-                        price.input_per_million,
-                        price.output_per_million
-                    )));
+        PricePanelState::Ready(_) => {
+            let matching = state.matching_comparisons();
+            if matching.is_empty() {
+                lines.push(Line::from(bubble.muted(" No models match this search.")));
+            } else {
+                let first = state.scroll.min(matching.len().saturating_sub(1));
+                lines.push(Line::from(bubble.muted(format!(
+                    " Showing family {} of {} · wheel or arrows scroll",
+                    first + 1,
+                    matching.len()
+                ))));
+                for comparison in matching.into_iter().skip(first) {
+                    push_price_family(&mut lines, comparison, &bubble);
                 }
-                lines.push(Line::from(""));
             }
         }
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(Paragraph::new(lines), chunks[1]);
+}
+
+fn push_price_family(
+    lines: &mut Vec<Line<'static>>,
+    comparison: &crate::prices::PriceComparison,
+    bubble: &BubbleTheme,
+) {
+    let winner = Style::default()
+        .fg(bubble.palette.success)
+        .add_modifier(Modifier::BOLD);
+    lines.push(Line::from(Span::styled(
+        comparison.model_id.clone(),
+        bubble.focused_border.add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(bubble.muted(format!(
+        "  Family across {} gateways · best input {} · best output {}",
+        comparison.prices.len(),
+        comparison.input_winner.label(),
+        comparison.output_winner.label()
+    ))));
+    for price in &comparison.prices {
+        let overall_tie = comparison.overall_winners.contains(&price.gateway);
+        let every_gateway_tied = comparison.overall_winners.len() == comparison.prices.len();
+        let partial_best_value = overall_tie && !every_gateway_tied;
+        let input_winner =
+            !every_gateway_tied && (partial_best_value || price.gateway == comparison.input_winner);
+        let output_winner = !every_gateway_tied
+            && (partial_best_value || price.gateway == comparison.output_winner);
+        let overall_winner = comparison.overall_winner == Some(price.gateway);
+        let mut spans = vec![
+            Span::styled(format!("  {:<20}", price.gateway.label()), bubble.text),
+            Span::styled(
+                format!(" ${:.4}/M input", price.input_per_million),
+                if input_winner { winner } else { bubble.muted },
+            ),
+            Span::styled(
+                format!(" · ${:.4}/M output", price.output_per_million),
+                if output_winner { winner } else { bubble.muted },
+            ),
+        ];
+        if overall_winner {
+            spans.push(Span::styled("  BEST OVERALL", winner));
+        } else if partial_best_value {
+            spans.push(Span::styled("  BEST VALUE", winner));
+        } else if input_winner || output_winner {
+            let label = match (input_winner, output_winner) {
+                (true, true) => "  BEST INPUT + OUTPUT",
+                (true, false) => "  BEST INPUT",
+                (false, true) => "  BEST OUTPUT",
+                (false, false) => unreachable!(),
+            };
+            spans.push(Span::styled(label, winner));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines.push(Line::from(""));
 }
 
 #[cfg(test)]
@@ -923,5 +1025,100 @@ mod tests {
                 .iter()
                 .any(|(row, _)| matches!(row, SettingsRow::Focus(SFocus::Key(1))))
         );
+    }
+
+    #[test]
+    fn price_family_emphasizes_input_and_output_winners() {
+        use crate::prices::{Gateway, PriceComparison, PriceRowOwned};
+
+        let comparison = PriceComparison {
+            model_id: "example/model".into(),
+            input_winner: Gateway::KiloGateway,
+            output_winner: Gateway::VercelAiGateway,
+            overall_winner: None,
+            overall_tied: false,
+            overall_winners: vec![],
+            prices: vec![
+                PriceRowOwned {
+                    gateway: Gateway::KiloGateway,
+                    input_per_million: 1.0,
+                    output_per_million: 5.0,
+                    model_id: "example/model".into(),
+                },
+                PriceRowOwned {
+                    gateway: Gateway::VercelAiGateway,
+                    input_per_million: 2.0,
+                    output_per_million: 4.0,
+                    model_id: "example/model".into(),
+                },
+            ],
+        };
+        let bubble = bubble_theme(&Theme::default());
+        let mut lines = Vec::new();
+        push_price_family(&mut lines, &comparison, &bubble);
+
+        assert!(lines[2].to_string().contains("BEST INPUT"));
+        assert!(lines[3].to_string().contains("BEST OUTPUT"));
+        assert_eq!(lines[2].spans[1].style.fg, Some(bubble.palette.success));
+        assert_eq!(lines[3].spans[2].style.fg, Some(bubble.palette.success));
+    }
+
+    #[test]
+    fn price_family_hides_best_value_when_every_gateway_is_equal() {
+        use crate::prices::{Gateway, PriceComparison, PriceRowOwned};
+
+        let price = |gateway| PriceRowOwned {
+            gateway,
+            input_per_million: 1.0,
+            output_per_million: 1.0,
+            model_id: "example/model".into(),
+        };
+        let comparison = PriceComparison {
+            model_id: "example/model".into(),
+            input_winner: Gateway::KiloGateway,
+            output_winner: Gateway::KiloGateway,
+            overall_winner: None,
+            overall_tied: true,
+            overall_winners: vec![Gateway::KiloGateway, Gateway::OpenRouter],
+            prices: vec![price(Gateway::KiloGateway), price(Gateway::OpenRouter)],
+        };
+        let bubble = bubble_theme(&Theme::default());
+        let mut lines = Vec::new();
+        push_price_family(&mut lines, &comparison, &bubble);
+
+        assert!(!lines[2].to_string().contains("BEST"));
+        assert!(!lines[3].to_string().contains("BEST"));
+    }
+
+    #[test]
+    fn price_family_marks_each_partial_tie_as_best_value() {
+        use crate::prices::{Gateway, PriceComparison, PriceRowOwned};
+
+        let price = |gateway, input, output| PriceRowOwned {
+            gateway,
+            input_per_million: input,
+            output_per_million: output,
+            model_id: "example/model".into(),
+        };
+        let comparison = PriceComparison {
+            model_id: "example/model".into(),
+            input_winner: Gateway::KiloGateway,
+            output_winner: Gateway::KiloGateway,
+            overall_winner: None,
+            overall_tied: true,
+            overall_winners: vec![Gateway::KiloGateway, Gateway::OpenRouter],
+            prices: vec![
+                price(Gateway::KiloGateway, 1.0, 1.0),
+                price(Gateway::OpenRouter, 1.0, 1.0),
+                price(Gateway::VercelAiGateway, 2.0, 2.0),
+            ],
+        };
+        let bubble = bubble_theme(&Theme::default());
+        let mut lines = Vec::new();
+        push_price_family(&mut lines, &comparison, &bubble);
+
+        assert!(lines[2].to_string().contains("BEST VALUE"));
+        assert!(lines[3].to_string().contains("BEST VALUE"));
+        assert!(!lines[4].to_string().contains("BEST VALUE"));
     }
 }
