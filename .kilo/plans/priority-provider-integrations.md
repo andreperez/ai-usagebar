@@ -65,21 +65,12 @@ returns organization-level `credit_balance_cents`,
 - [x] Add scoped cache, widget, TUI, `usage --json`, Settings, desktop adapters,
   tests, docs, and an ignored live smoke test.
 
-### 4. Ollama Local Runtime
-
-**Viable as availability/inventory, not billing.** The local API has no
-authentication and exposes installed/running models. Per-request token metrics
-are returned only after a generation, so ai-usagebar must not issue a
-generation just to create usage data.
-
-- Add an opt-in local endpoint probe and model inventory.
-- Do not present a balance, quota, or synthetic usage percentage.
-
 ## Deferred Pending Official Read-Only Account APIs
 
 | Provider | Current blocker |
-| Context7 | The public API exposes only `libraryId`-scoped request metrics. Teamspace credits, remaining quota, and aggregate cost remain dashboard-only. |
 |---|---|
+| Context7 | The public API exposes only `libraryId`-scoped request metrics. Teamspace credits, remaining quota, and aggregate cost remain dashboard-only. |
+| Ollama | Cloud session/weekly usage is dashboard-only (`ollama.com/settings`); no public API exists. Upstream request [ollama#12532](https://github.com/ollama/ollama/issues/12532) is still open, and every third-party "solution" scrapes the settings HTML with the account's `__Secure-session` browser cookie, which the project rejects as credential-fragile internal scraping. The local-runtime inventory slice was removed because installed/running models do not represent balance or credits. |
 | GitHub Copilot | User billing endpoints expose only personally billed subscriptions. Organization or enterprise billing requires a separately configured administrator or billing-manager scope, which does not serve the current account. |
 | OpenCode Zen | Documented API-key endpoint reports Go subscription windows; no public API-key balance endpoint for Zen PAYG credits. Existing `opencode-go` already covers that separate subscription endpoint. |
 | Mercury / Inception | Public docs provide model pricing and rate limits, but no documented account billing or remaining-token endpoint. |
@@ -110,6 +101,7 @@ generation just to create usage data.
 - [Context7 usage](https://context7.com/docs/howto/usage)
 - [Context7 library metrics](https://context7.com/docs/api-reference/metrics/get-library-usage-metrics)
 - [Ollama usage](https://docs.ollama.com/api/usage)
+- [Ollama cloud usage feature request](https://github.com/ollama/ollama/issues/12532)
 - [OpenCode Zen](https://opencode.ai/docs/zen/)
 - [GitHub Copilot billing usage](https://docs.github.com/en/rest/billing/usage)
 - [GitHub Copilot usage metrics](https://docs.github.com/en/rest/copilot/copilot-usage-metrics)
