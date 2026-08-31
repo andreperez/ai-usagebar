@@ -754,7 +754,7 @@ mod tests {
         let entry = &value["entries"][0];
         assert_eq!(entry["id"], "requesty");
         assert_eq!(entry["display_name"], "Requesty");
-        assert_eq!(entry["plan"], "Acme Corp");
+        assert_eq!(entry["plan"], "Requesty");
         assert!(entry["metrics"].as_array().unwrap().is_empty());
         assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
             section["type"] == "text"

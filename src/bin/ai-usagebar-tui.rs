@@ -575,6 +575,10 @@ fn handle_price_key(screen: &mut PriceScreenState, code: KeyCode, modifiers: Key
     );
     match code {
         KeyCode::Esc => true,
+        KeyCode::F(2) => {
+            screen.cycle_sort();
+            false
+        }
         KeyCode::Backspace => {
             screen.query.pop();
             screen.reset_scroll();
@@ -624,7 +628,17 @@ fn handle_mouse(app: &mut App, m: &event::MouseEvent) -> Option<MouseAction> {
         match m.kind {
             MouseEventKind::ScrollUp => screen.scroll_by(-1),
             MouseEventKind::ScrollDown => screen.scroll_by(1),
-            MouseEventKind::Down(MouseButton::Left) => {}
+            MouseEventKind::Down(MouseButton::Left) => {
+                let pos = Position::new(m.column, m.row);
+                if app
+                    .hit
+                    .borrow()
+                    .price_sort
+                    .is_some_and(|rect| rect.contains(pos))
+                {
+                    screen.cycle_sort();
+                }
+            }
             _ => {}
         }
         return None;
@@ -774,6 +788,7 @@ mod tests {
 
         let comparison = |id: &str| PriceComparison {
             model_id: id.into(),
+            identifiers: vec![id.into()],
             input_winner: Gateway::KiloGateway,
             output_winner: Gateway::KiloGateway,
             overall_winner: Some(Gateway::KiloGateway),
@@ -792,6 +807,7 @@ mod tests {
                 comparison("openai/gpt-test"),
             ]),
             query: String::new(),
+            sort: ai_usagebar::tui::app::PriceSort::Name,
             scroll: 0,
         };
         handle_price_key(&mut screen, KeyCode::Char('c'), KeyModifiers::NONE);
@@ -808,6 +824,8 @@ mod tests {
         handle_price_key(&mut screen, KeyCode::End, KeyModifiers::NONE);
         assert_eq!(screen.scroll, 0);
         screen.query.clear();
+        handle_price_key(&mut screen, KeyCode::F(2), KeyModifiers::NONE);
+        assert_eq!(screen.sort, ai_usagebar::tui::app::PriceSort::Price);
         handle_price_key(&mut screen, KeyCode::Down, KeyModifiers::NONE);
         assert_eq!(screen.scroll, 1);
         assert!(handle_price_key(
@@ -826,6 +844,7 @@ mod tests {
             load: PricePanelState::Ready(vec![
                 PriceComparison {
                     model_id: "one/model".into(),
+                    identifiers: vec!["one/model".into()],
                     input_winner: Gateway::KiloGateway,
                     output_winner: Gateway::KiloGateway,
                     overall_winner: Some(Gateway::KiloGateway),
@@ -840,6 +859,7 @@ mod tests {
                 },
                 PriceComparison {
                     model_id: "two/model".into(),
+                    identifiers: vec!["two/model".into()],
                     input_winner: Gateway::KiloGateway,
                     output_winner: Gateway::KiloGateway,
                     overall_winner: Some(Gateway::KiloGateway),
@@ -854,6 +874,7 @@ mod tests {
                 },
             ]),
             query: String::new(),
+            sort: ai_usagebar::tui::app::PriceSort::Name,
             scroll: 0,
         });
         let wheel = event::MouseEvent {

@@ -52,6 +52,7 @@ pub struct UsageResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UsageEntry {
+    #[serde(deserialize_with = "deserialize_f64_or_string")]
     pub spend: f64,
     pub total_requests: u64,
     pub input_tokens: u64,
@@ -139,6 +140,17 @@ mod tests {
         assert_eq!(usage.input_tokens, 2100);
         assert_eq!(usage.output_tokens, 1400);
         assert_eq!(usage.total_tokens, 3500);
+    }
+
+    #[test]
+    fn usage_schema_accepts_string_spend() {
+        let usage = serde_json::from_str::<UsageResponse>(
+            r#"{"usage":{"2026-08-01":{"spend":"1.25","total_requests":10,"input_tokens":1200,"output_tokens":800,"total_tokens":2000}}}"#,
+        )
+        .unwrap()
+        .into_usage()
+        .unwrap();
+        assert_eq!(usage.mtd_spend, 1.25);
     }
 
     #[test]

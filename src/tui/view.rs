@@ -58,6 +58,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     hit.settings_rows.clear();
     hit.price_search = None;
     hit.price_list = None;
+    hit.price_sort = None;
     if let Some(s) = &app.settings {
         crate::tui::settings::render(f, f.area(), s, &app.theme, &mut hit.settings_rows);
     }
@@ -99,12 +100,12 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn vendor_label(id: VendorId) -> &'static str {
-    // The wide label adds product context for Z.AI; all canonical names live
-    // on VendorId so new providers do not require another copied match table.
-    if id == VendorId::Zai {
-        "GLM (Z.AI)"
-    } else {
-        id.display_name()
+    // The TUI adds product context where one vendor combines distinct account
+    // surfaces; canonical names remain on VendorId for machine-facing reports.
+    match id {
+        VendorId::Zai => "GLM (Z.AI)",
+        VendorId::Openai => "Codex/OpenAI",
+        _ => id.display_name(),
     }
 }
 
@@ -121,8 +122,8 @@ fn tab_label(tab: &TabId) -> String {
 /// Compact variant for the narrow top-nav strip.
 fn compact_tab_label(tab: &TabId) -> String {
     let label = match &tab.account {
-        Some(acct) => format!("{} · {}", tab.vendor.display_name(), acct),
-        None => tab.vendor.display_name().to_string(),
+        Some(acct) => format!("{} · {}", vendor_label(tab.vendor), acct),
+        None => vendor_label(tab.vendor).to_string(),
     };
     crate::display::sanitize_untrusted_field(&label)
 }
@@ -354,9 +355,13 @@ fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
         ];
         match app.tabs.get(i) {
             Some(TabState::Ready(r)) => {
-                // Mini bar for the vendor's headline metric, mirroring the
-                // menu-bar overview; balance-only vendors have none.
-                if let Some(p) = panels::headline_pct(&r.snapshot) {
+                let progress = panels::overview_percentages(&r.snapshot);
+                // Most vendors have one headline bar. Providers with separate
+                // independent windows (currently OpenCode Go) render every
+                // window as its own bar instead of reducing the rest to text.
+                if progress.is_empty()
+                    && let Some(p) = panels::headline_pct(&r.snapshot)
+                {
                     let filled = (p.clamp(0, 100) as usize * OVERVIEW_BAR_W).div_ceil(100);
                     let sev_color =
                         severity_color(&app.theme, &theme, crate::pango::severity_for(p));
@@ -373,21 +378,54 @@ fn draw_overview(f: &mut Frame, app: &App, area: Rect) {
                     spans.push(theme.span("  "));
                 }
                 let (plan, cells) = panels::compact_cells(&r.snapshot);
+                if !progress.is_empty() {
+                    for (j, (label, p)) in progress.iter().enumerate() {
+                        if j > 0 {
+                            spans.push(theme.span("  "));
+                        }
+                        let filled = ((*p).clamp(0, 100) as usize * OVERVIEW_BAR_W).div_ceil(100);
+                        let sev_color =
+                            severity_color(&app.theme, &theme, crate::pango::severity_for(*p));
+                        spans.push(theme.muted(format!("{label} ")));
+                        spans.push(Span::styled(
+                            "█".repeat(filled),
+                            Style::default().fg(sev_color),
+                        ));
+                        let empty = color(&app.theme.bar_empty)
+                            .unwrap_or(theme.palette.selected_background);
+                        spans.push(Span::styled(
+                            "░".repeat(OVERVIEW_BAR_W - filled),
+                            Style::default().fg(empty),
+                        ));
+                        spans.push(Span::styled(
+                            format!(" {p}%"),
+                            Style::default().fg(sev_color),
+                        ));
+                    }
+                    spans.push(theme.span("  "));
+                }
                 if !plan.is_empty() {
                     spans.push(theme.muted(format!("{plan}  ")));
                 }
-                for (j, (text, sev)) in cells.iter().enumerate() {
-                    if j > 0 {
-                        spans.push(theme.span("  "));
+                if progress.is_empty() {
+                    for (j, (text, sev)) in cells.iter().enumerate() {
+                        if j > 0 {
+                            spans.push(theme.span("  "));
+                        }
+                        let color = severity_color(&app.theme, &theme, *sev);
+                        spans.push(Span::styled(text.clone(), Style::default().fg(color)));
                     }
-                    let color = severity_color(&app.theme, &theme, *sev);
-                    spans.push(Span::styled(text.clone(), Style::default().fg(color)));
                 }
                 if r.stale {
                     spans.push(theme.muted("  ⏸"));
                 }
                 if r.last_error.is_some() {
-                    spans.push(theme.muted(" ⚠"));
+                    match r.snapshot {
+                        crate::usage::VendorSnapshot::Requesty(_) => {
+                            spans.push(theme.muted("  usage unavailable"));
+                        }
+                        _ => spans.push(theme.muted(" ⚠")),
+                    }
                 }
                 if app.tab_is_refreshing(i) {
                     spans.push(theme.muted("  ↻"));
@@ -552,16 +590,20 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
         search_inner,
     );
     f.render_widget(
-        Paragraph::new(bubble.muted(" type to filter exact model IDs · arrows or wheel scroll")),
+        Paragraph::new(bubble.muted(format!(
+            " F2 / click: order {} · name · best price · provider",
+            state.sort.label()
+        ))),
         search_row[1],
     );
     {
         let mut hit = app.hit.borrow_mut();
         hit.price_search = Some(search_row[0]);
         hit.price_list = Some(chunks[1]);
+        hit.price_sort = Some(search_row[1]);
     }
     let mut lines = vec![Line::from(bubble.muted(
-        " Type to filter exact model IDs · arrows or wheel scroll · bold green values are cheapest in this family",
+        " Type to filter exact model IDs · F2 / click changes order · bold green values are cheapest in this family",
     ))];
     match &state.load {
         PricePanelState::Loading => lines.push(Line::from(
@@ -612,6 +654,12 @@ fn push_price_family(
         comparison.input_winner.label(),
         comparison.output_winner.label()
     ))));
+    if comparison.identifiers.len() > 1 {
+        lines.push(Line::from(bubble.muted(format!(
+            "  Identifiers: {}",
+            comparison.identifiers.join(" · ")
+        ))));
+    }
     for price in &comparison.prices {
         let overall_tie = comparison.overall_winners.contains(&price.gateway);
         let every_gateway_tied = comparison.overall_winners.len() == comparison.prices.len();
@@ -632,6 +680,9 @@ fn push_price_family(
                 if output_winner { winner } else { bubble.muted },
             ),
         ];
+        if comparison.identifiers.len() > 1 {
+            spans.push(bubble.muted(format!("  [{}]", price.model_id)));
+        }
         if overall_winner {
             spans.push(Span::styled("  BEST OVERALL", winner));
         } else if partial_best_value {
@@ -1033,6 +1084,7 @@ mod tests {
 
         let comparison = PriceComparison {
             model_id: "example/model".into(),
+            identifiers: vec!["example/model".into()],
             input_winner: Gateway::KiloGateway,
             output_winner: Gateway::VercelAiGateway,
             overall_winner: None,
@@ -1075,6 +1127,7 @@ mod tests {
         };
         let comparison = PriceComparison {
             model_id: "example/model".into(),
+            identifiers: vec!["example/model".into()],
             input_winner: Gateway::KiloGateway,
             output_winner: Gateway::KiloGateway,
             overall_winner: None,
@@ -1102,6 +1155,7 @@ mod tests {
         };
         let comparison = PriceComparison {
             model_id: "example/model".into(),
+            identifiers: vec!["example/model".into()],
             input_winner: Gateway::KiloGateway,
             output_winner: Gateway::KiloGateway,
             overall_winner: None,

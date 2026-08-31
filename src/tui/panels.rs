@@ -218,12 +218,7 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
             ("Firecrawl".into(), vec![cell])
         }
         VendorSnapshot::Parallel(s) => (
-            if s.will_invoice {
-                "Parallel invoice"
-            } else {
-                "Parallel prepaid"
-            }
-            .into(),
+            String::new(),
             vec![(
                 s.prepaid_balance()
                     .map(crate::format::usd)
@@ -232,7 +227,7 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
             )],
         ),
         VendorSnapshot::Requesty(s) => (
-            s.org_name.clone(),
+            String::new(),
             vec![(
                 crate::format::usd(s.balance),
                 crate::requesty::vendor::severity(s),
@@ -333,15 +328,44 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
                 .utilization_pct
                 .max(subscription.seven_day.window.utilization_pct)
         }),
-        VendorSnapshot::VercelGateway(_) => None,
-        VendorSnapshot::Openrouter(_)
-        | VendorSnapshot::Deepseek(_)
+        VendorSnapshot::VercelGateway(_) | VendorSnapshot::Openrouter(_) => None,
+        VendorSnapshot::Deepseek(_)
         | VendorSnapshot::Kilo(_)
         | VendorSnapshot::Novita(_)
         | VendorSnapshot::Moonshot(_)
         | VendorSnapshot::Grok(_)
         | VendorSnapshot::Parallel(_)
         | VendorSnapshot::Requesty(_) => None,
+    }
+}
+
+/// Every compact progress metric the Overview should render as a bar. Most
+/// vendors have one headline bar; OpenCode Go has three independent windows
+/// and keeping them as text obscures their actual progress.
+pub fn overview_percentages(snapshot: &VendorSnapshot) -> Vec<(String, i32)> {
+    match snapshot {
+        VendorSnapshot::Openai(s) => [("5h", s.session.as_ref()), ("7d", s.weekly.as_ref())]
+            .into_iter()
+            .filter_map(|(label, window)| {
+                window.map(|window| (label.into(), window.utilization_pct.clamp(0, 100)))
+            })
+            .collect(),
+        VendorSnapshot::OpenCodeGo(s) => [
+            ("rolling", s.rolling.as_ref()),
+            ("weekly", s.weekly.as_ref()),
+            ("monthly", s.monthly.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(label, window)| {
+            window.map(|window| {
+                (
+                    label.into(),
+                    window.percent.round().clamp(0.0, 100.0) as i32,
+                )
+            })
+        })
+        .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -644,6 +668,10 @@ fn openai_sections(
         left: s.plan.clone(),
         right: None,
     }]);
+    v.push(Section::Text {
+        label: "Usage source".into(),
+        value: "ChatGPT subscription via Codex OAuth".into(),
+    });
     if let Some(session) = &s.session {
         push_window(&mut v, "Codex 5h", session, now, tol, true);
     }
@@ -674,8 +702,9 @@ fn openai_sections(
         if let Some((lo, hi)) = c.approx_cloud_messages {
             body.push(format!("≈ {lo}-{hi} cloud messages"));
         }
+        body.insert(0, "Separate from ChatGPT subscription usage above.".into());
         v.push(Section::Block {
-            label: "Credits".into(),
+            label: "OpenAI API credits".into(),
             body,
         });
     }
@@ -711,25 +740,19 @@ fn openrouter_sections(s: &crate::usage::OpenRouterSnapshot) -> SectionBuilder {
         left: s.label.clone(),
         right: None,
     }]);
-    let pct = s.consumed_pct().clamp(0, 100) as u16;
     v.push(Section::Spacer);
-    v.push_metric(
-        Section::Metric {
-            label: "Credit balance".into(),
-            pct,
-            // One severity policy for every frontend: this value is what the
-            // Omarchy, GNOME and KDE panels colour their row with, so it has to
-            // agree with the Waybar tooltip about what "in debt" looks like.
-            severity: crate::openrouter::vendor::severity(s),
-            value_label: usd(s.balance()),
-            footnote: format!(
-                "{} of {} used ({pct}%)",
-                usd(s.total_usage),
-                usd(s.total_credits)
-            ),
-        },
-        None,
-    );
+    v.push(Section::Text {
+        label: "API-reported purchased balance".into(),
+        value: usd(s.balance()),
+    });
+    v.push(Section::Text {
+        label: "Lifetime purchased / used".into(),
+        value: format!("{} / {}", usd(s.total_credits), usd(s.total_usage)),
+    });
+    v.push(Section::Text {
+        label: "Credit grants".into(),
+        value: "not exposed by the public API".into(),
+    });
     v.push(Section::Spacer);
     v.push(Section::Block {
         label: "Usage by period".into(),
@@ -1288,7 +1311,7 @@ fn firecrawl_sections(s: &crate::usage::FirecrawlSnapshot, now: DateTime<Utc>) -
 
 fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
     let mut sections = SectionBuilder::new(vec![Section::Title {
-        left: s.org_name.clone(),
+        left: "Requesty".into(),
         right: None,
     }]);
     sections.push(Section::Spacer);
@@ -1303,21 +1326,6 @@ fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
                 "{} · {} requests",
                 crate::format::usd(usage.mtd_spend),
                 usage.requests
-            ),
-        });
-        sections.push(Section::Block {
-            label: "Tokens".into(),
-            body: vec![format!(
-                "input {} · output {} · total {}",
-                usage.input_tokens, usage.output_tokens, usage.total_tokens
-            )],
-        });
-        sections.push(Section::Text {
-            label: "Usage interval".into(),
-            value: format!(
-                "{} to {}",
-                s.interval_start.to_rfc3339(),
-                s.interval_end.to_rfc3339()
             ),
         });
     }
@@ -1852,7 +1860,7 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_always_has_balance_metric_and_period_block() {
+    fn openrouter_shows_purchased_balance_without_a_historical_usage_bar() {
         let snap = OpenRouterSnapshot {
             label: "OR".into(),
             total_credits: 100.0,
@@ -1866,11 +1874,17 @@ mod tests {
         };
         let sections = sections_for(&ready(VendorSnapshot::Openrouter(snap)), now(), 5);
         assert!(matches!(sections[0], Section::Title { .. }));
-        assert!(
-            sections
-                .iter()
-                .any(|s| matches!(s, Section::Metric { label, .. } if label == "Credit balance"))
-        );
+        assert!(!sections.iter().any(|s| matches!(s, Section::Metric { .. })));
+        assert!(sections.iter().any(|s| matches!(
+            s,
+            Section::Text { label, value }
+                if label == "API-reported purchased balance" && value == "$75.00"
+        )));
+        assert!(sections.iter().any(|s| matches!(
+            s,
+            Section::Text { label, value }
+                if label == "Credit grants" && value == "not exposed by the public API"
+        )));
         assert!(
             sections
                 .iter()
@@ -1878,11 +1892,8 @@ mod tests {
         );
     }
 
-    /// #118 reached every frontend, not just Waybar: the panel row is what the
-    /// Omarchy, GNOME and KDE plugins colour and label from, so the debt has to
-    /// survive the projection with its sign and its severity intact.
     #[test]
-    fn openrouter_debt_reaches_the_panel_row_red_and_signed() {
+    fn openrouter_debt_stays_signed_without_a_fabricated_percentage() {
         let snap = OpenRouterSnapshot {
             label: "OR".into(),
             total_credits: 0.0,
@@ -1895,22 +1906,12 @@ mod tests {
             limit_remaining: None,
         };
         let sections = sections_for(&ready(VendorSnapshot::Openrouter(snap.clone())), now(), 5);
-        let metric = sections
-            .iter()
-            .find_map(|s| match s {
-                Section::Metric {
-                    label,
-                    value_label,
-                    severity,
-                    footnote,
-                    ..
-                } if label == "Credit balance" => Some((value_label, severity, footnote)),
-                _ => None,
-            })
-            .expect("no credit balance metric");
-        assert_eq!(metric.0, "-$5.71");
-        assert_eq!(*metric.1, PaceSeverity::Critical);
-        assert_eq!(metric.2, "$5.71 of $0.00 used (0%)");
+        assert!(sections.iter().any(|s| matches!(
+            s,
+            Section::Text { label, value }
+                if label == "API-reported purchased balance" && value == "-$5.71"
+        )));
+        assert!(!sections.iter().any(|s| matches!(s, Section::Metric { .. })));
 
         // ...and the same number in the dense Overview list.
         let (_, cells) = compact_cells(&VendorSnapshot::Openrouter(snap));
@@ -1999,7 +2000,9 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|s| matches!(s, Section::Block { label, .. } if label == "Credits"))
+                .any(|s| matches!(s, Section::Block { label, body }
+                    if label == "OpenAI API credits"
+                        && body.first().is_some_and(|line| line.contains("Separate from ChatGPT"))))
         );
     }
 
@@ -2200,8 +2203,15 @@ mod tests {
         )));
         assert!(sections.iter().any(|section| matches!(
             section,
-            Section::Block { label, body }
-                if label == "Tokens" && body.iter().any(|line| line.contains("total 3500"))
+            Section::Title { left, .. } if left == "Requesty"
+        )));
+        assert!(!sections.iter().any(|section| matches!(
+            section,
+            Section::Block { label, .. } if label == "Tokens"
+        )));
+        assert!(!sections.iter().any(|section| matches!(
+            section,
+            Section::Text { label, .. } if label == "Usage interval"
         )));
     }
 
@@ -2374,6 +2384,43 @@ mod tests {
             balance: 8.42,
         });
         assert_eq!(headline_pct(&kilo), None);
+
+        let openrouter = VendorSnapshot::Openrouter(crate::usage::OpenRouterSnapshot {
+            label: "OpenRouter".into(),
+            total_credits: 187.0,
+            total_usage: 163.82,
+            usage_daily: 0.0,
+            usage_weekly: 0.0,
+            usage_monthly: 0.0,
+            is_free_tier: false,
+            limit: None,
+            limit_remaining: None,
+        });
+        assert_eq!(headline_pct(&openrouter), None);
+    }
+
+    #[test]
+    fn overview_percentages_keeps_both_codex_subscription_windows() {
+        let snapshot = VendorSnapshot::Openai(crate::usage::OpenAiSnapshot {
+            plan: "ChatGPT Plus".into(),
+            session: Some(UsageWindow {
+                utilization_pct: 40,
+                resets_at: None,
+                window_duration: chrono::Duration::hours(5),
+            }),
+            weekly: Some(UsageWindow {
+                utilization_pct: 24,
+                resets_at: None,
+                window_duration: chrono::Duration::days(7),
+            }),
+            code_review: None,
+            credits: None,
+            source: crate::usage::OpenAiSource::CodexOauth,
+        });
+        assert_eq!(
+            overview_percentages(&snapshot),
+            vec![("5h".into(), 40), ("7d".into(), 24)]
+        );
     }
 
     #[test]

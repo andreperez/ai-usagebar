@@ -68,6 +68,10 @@ pub struct Config {
     /// it to the runtime provider set.
     #[serde(rename = "github-copilot", skip_serializing)]
     pub ignored_removed_github_copilot_section: Option<toml::Value>,
+    /// Accepts configuration written by the removed Ollama inventory provider
+    /// without restoring it to the runtime provider set.
+    #[serde(rename = "ollama", skip_serializing)]
+    pub ignored_removed_ollama_section: Option<toml::Value>,
 }
 
 /// UI / dispatch preferences: active providers control automatic refresh and
@@ -76,16 +80,19 @@ pub struct Config {
 #[serde(default)]
 pub struct UiConfig {
     /// `None` → fall back to the first active provider for backward compatibility.
+    #[serde(default, deserialize_with = "deserialize_primary_vendor")]
     pub primary: Option<VendorId>,
     /// Explicit provider scope for automatic fetches: TUI tabs/Overview,
     /// `usage --json`, and widget cycling/default resolution. `None` preserves
     /// legacy behavior (every enabled, configured provider). `Some([])` is a
     /// valid deliberate choice that disables automatic provider fetches while
     /// retaining explicit `--vendor` fetches.
+    #[serde(default, deserialize_with = "deserialize_vendor_list")]
     pub active_vendors: Option<Vec<VendorId>>,
     /// Which vendors the Overview shows (the TUI's first tab and the macOS
     /// menu-bar's top section), in this order. `None` → every active vendor,
     /// in the canonical order.
+    #[serde(default, deserialize_with = "deserialize_vendor_list")]
     pub overview_vendors: Option<Vec<VendorId>>,
     /// Layout style for vendor navigation in the TUI: sidebar | navbar | none.
     pub vendor_box: Option<VendorBoxStyle>,
@@ -95,6 +102,47 @@ impl UiConfig {
     pub fn vendor_box(&self) -> VendorBoxStyle {
         self.vendor_box.unwrap_or_default()
     }
+}
+
+fn deserialize_primary_vendor<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<VendorId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let slug = Option::<String>::deserialize(deserializer)?;
+    match slug {
+        Some(slug) if is_removed_vendor_slug(&slug) => Ok(None),
+        Some(slug) => serde_json::from_value(serde_json::Value::String(slug))
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
+fn deserialize_vendor_list<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<VendorId>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let slugs = Option::<Vec<String>>::deserialize(deserializer)?;
+    slugs
+        .map(|slugs| {
+            slugs
+                .into_iter()
+                .filter(|slug| !is_removed_vendor_slug(slug))
+                .map(|slug| {
+                    serde_json::from_value(serde_json::Value::String(slug))
+                        .map_err(serde::de::Error::custom)
+                })
+                .collect()
+        })
+        .transpose()
+}
+
+fn is_removed_vendor_slug(slug: &str) -> bool {
+    matches!(slug, "github-copilot" | "ollama")
 }
 
 /// Presentation style of the TUI vendor navigation box.
@@ -1658,6 +1706,35 @@ mod tests {
         );
         let config = Config::load_from(file.path()).unwrap();
         assert!(config.ignored_removed_github_copilot_section.is_some());
+    }
+
+    #[test]
+    fn removed_ollama_section_is_ignored() {
+        let file = write_toml(
+            r#"
+            [ollama]
+            enabled = true
+            host = "http://127.0.0.1:11434"
+            "#,
+        );
+        let config = Config::load_from(file.path()).unwrap();
+        assert!(config.ignored_removed_ollama_section.is_some());
+    }
+
+    #[test]
+    fn removed_vendor_slugs_are_filtered_from_ui_preferences() {
+        let file = write_toml(
+            r#"
+            [ui]
+            primary = "ollama"
+            active_vendors = ["openai", "ollama"]
+            overview_vendors = ["ollama", "openrouter"]
+            "#,
+        );
+        let config = Config::load_from(file.path()).unwrap();
+        assert_eq!(config.ui.primary, None);
+        assert_eq!(config.ui.active_vendors, Some(vec![VendorId::Openai]));
+        assert_eq!(config.ui.overview_vendors, Some(vec![VendorId::Openrouter]));
     }
 
     #[test]

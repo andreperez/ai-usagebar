@@ -40,8 +40,34 @@ pub enum PricePanelState {
 pub struct PriceScreenState {
     pub load: PricePanelState,
     pub query: String,
+    pub sort: PriceSort,
     /// First matching model-family index to render.
     pub scroll: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceSort {
+    Name,
+    Price,
+    Provider,
+}
+
+impl PriceSort {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Price => "best price",
+            Self::Provider => "provider",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Price,
+            Self::Price => Self::Provider,
+            Self::Provider => Self::Name,
+        }
+    }
 }
 
 impl PriceScreenState {
@@ -49,6 +75,7 @@ impl PriceScreenState {
         Self {
             load: PricePanelState::Loading,
             query: String::new(),
+            sort: PriceSort::Name,
             scroll: 0,
         }
     }
@@ -58,12 +85,31 @@ impl PriceScreenState {
         let PricePanelState::Ready(comparisons) = &self.load else {
             return Vec::new();
         };
-        comparisons
+        let mut matching: Vec<_> = comparisons
             .iter()
             .filter(|comparison| {
-                query.is_empty() || comparison.model_id.to_ascii_lowercase().contains(&query)
+                query.is_empty()
+                    || comparison.model_id.to_ascii_lowercase().contains(&query)
+                    || comparison
+                        .identifiers
+                        .iter()
+                        .any(|identifier| identifier.to_ascii_lowercase().contains(&query))
             })
-            .collect()
+            .collect();
+        match self.sort {
+            PriceSort::Name => matching.sort_by(|left, right| left.model_id.cmp(&right.model_id)),
+            PriceSort::Price => matching.sort_by(|left, right| {
+                best_price(left)
+                    .total_cmp(&best_price(right))
+                    .then_with(|| left.model_id.cmp(&right.model_id))
+            }),
+            PriceSort::Provider => matching.sort_by(|left, right| {
+                first_provider(left)
+                    .cmp(first_provider(right))
+                    .then_with(|| left.model_id.cmp(&right.model_id))
+            }),
+        }
+        matching
     }
 
     pub fn scroll_by(&mut self, delta: isize) {
@@ -83,6 +129,29 @@ impl PriceScreenState {
     pub fn scroll_to_end(&mut self) {
         self.scroll = self.matching_comparisons().len().saturating_sub(1);
     }
+
+    pub fn cycle_sort(&mut self) {
+        self.sort = self.sort.next();
+        self.reset_scroll();
+    }
+}
+
+fn best_price(comparison: &crate::prices::PriceComparison) -> f64 {
+    comparison
+        .prices
+        .iter()
+        .map(|price| price.input_per_million + price.output_per_million)
+        .min_by(|left, right| left.total_cmp(right))
+        .unwrap_or(f64::INFINITY)
+}
+
+fn first_provider(comparison: &crate::prices::PriceComparison) -> &str {
+    comparison
+        .prices
+        .iter()
+        .map(|price| price.gateway.label())
+        .min()
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +326,7 @@ pub struct HitTargets {
     /// Search field and scrollable list on the full-screen price route.
     pub price_search: Option<Rect>,
     pub price_list: Option<Rect>,
+    pub price_sort: Option<Rect>,
 }
 
 /// What a click in the vendor navigation selects.
@@ -1013,6 +1083,7 @@ mod tests {
 
         crate::prices::PriceComparison {
             model_id: model_id.into(),
+            identifiers: vec![model_id.into()],
             input_winner: Gateway::KiloGateway,
             output_winner: Gateway::VercelAiGateway,
             overall_winner: None,
@@ -1044,6 +1115,7 @@ mod tests {
                 price_comparison("anthropic/claude-opus"),
             ]),
             query: "claude".into(),
+            sort: PriceSort::Name,
             scroll: 0,
         };
         assert_eq!(screen.matching_comparisons().len(), 2);

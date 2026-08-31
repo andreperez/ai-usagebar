@@ -46,7 +46,8 @@ impl Gateway {
 
 #[derive(Debug, Serialize)]
 struct Comparison<'a> {
-    model_id: &'a str,
+    model_id: String,
+    identifiers: Vec<String>,
     input_winner: Gateway,
     output_winner: Gateway,
     overall_winner: Option<Gateway>,
@@ -73,6 +74,9 @@ pub async fn run(json: bool, model: Option<&str>) -> i32 {
             } else {
                 for comparison in comparisons {
                     println!("{}", comparison.model_id);
+                    if comparison.identifiers.len() > 1 {
+                        println!("  Identifiers: {}", comparison.identifiers.join(" · "));
+                    }
                     println!("  Cheapest input: {}", comparison.input_winner.label());
                     println!("  Cheapest output: {}", comparison.output_winner.label());
                     match comparison.overall_winner {
@@ -153,7 +157,7 @@ pub async fn load_comparisons(model: Option<&str>) -> Result<Vec<PriceComparison
     for id in groups.keys() {
         if requested
             .as_deref()
-            .is_none_or(|requested| requested == *id)
+            .is_none_or(|requested| canonical_model_id(requested) == *id)
             && let Some(comparison) = compare(&prices, id)
         {
             comparisons.push(owned(comparison));
@@ -172,6 +176,8 @@ pub async fn load_comparisons(model: Option<&str>) -> Result<Vec<PriceComparison
 #[derive(Debug, Clone, Serialize)]
 pub struct PriceComparison {
     pub model_id: String,
+    /// Exact identifiers used by source catalogs for this canonical family.
+    pub identifiers: Vec<String>,
     pub input_winner: Gateway,
     pub output_winner: Gateway,
     pub overall_winner: Option<Gateway>,
@@ -192,7 +198,8 @@ pub struct PriceRowOwned {
 
 fn owned(comparison: Comparison<'_>) -> PriceComparison {
     PriceComparison {
-        model_id: comparison.model_id.into(),
+        model_id: comparison.model_id,
+        identifiers: comparison.identifiers,
         input_winner: comparison.input_winner,
         output_winner: comparison.output_winner,
         overall_winner: comparison.overall_winner,
@@ -340,7 +347,7 @@ fn parse_price(value: Option<&serde_json::Value>) -> Option<f64> {
 fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> {
     let mut matching: Vec<_> = prices
         .iter()
-        .filter(|price| price.model_id == model)
+        .filter(|price| canonical_model_id(&price.model_id) == model)
         .collect();
     if matching.len() < 2 {
         return None;
@@ -370,9 +377,15 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
     } else {
         None
     };
-    let model_id = &matching[0].model_id;
+    let identifiers = matching
+        .iter()
+        .map(|price| price.model_id.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     Some(Comparison {
-        model_id,
+        model_id: model.into(),
+        identifiers,
         input_winner,
         output_winner,
         overall_winner,
@@ -390,13 +403,26 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
     })
 }
 
-fn comparable_models(prices: &[ModelPrice]) -> BTreeMap<&str, Vec<&ModelPrice>> {
-    let mut groups: BTreeMap<&str, Vec<&ModelPrice>> = BTreeMap::new();
+fn comparable_models(prices: &[ModelPrice]) -> BTreeMap<String, Vec<&ModelPrice>> {
+    let mut groups: BTreeMap<String, Vec<&ModelPrice>> = BTreeMap::new();
     for price in prices {
-        groups.entry(&price.model_id).or_default().push(price);
+        groups
+            .entry(canonical_model_id(&price.model_id))
+            .or_default()
+            .push(price);
     }
     groups.retain(|_, values| values.len() >= 2);
     groups
+}
+
+/// Catalogs use both `z-ai` and `zai` for the same published GLM family.
+/// Keep the raw IDs in `PriceRowOwned::model_id`, but compare that one known
+/// spelling alias as one family. Do not apply fuzzy matching to other IDs.
+fn canonical_model_id(model_id: &str) -> String {
+    model_id
+        .strip_prefix("z-ai/")
+        .map(|suffix| format!("zai/{suffix}"))
+        .unwrap_or_else(|| model_id.into())
 }
 
 #[cfg(test)]
@@ -441,6 +467,20 @@ mod tests {
         alias.model_id = "gpt-test".into();
         let prices = [price(Gateway::Requesty, 1e-6, 1e-6), alias];
         assert!(comparable_models(&prices).is_empty());
+    }
+
+    #[test]
+    fn known_zai_catalog_aliases_share_one_comparison_family() {
+        let mut kilo = price(Gateway::KiloGateway, 1e-6, 2e-6);
+        kilo.model_id = "z-ai/glm-5.3".into();
+        let mut requesty = price(Gateway::Requesty, 1e-6, 2e-6);
+        requesty.model_id = "zai/glm-5.3".into();
+        let prices = [kilo, requesty];
+        let groups = comparable_models(&prices);
+        assert_eq!(groups.len(), 1);
+        let comparison = compare(&prices, "zai/glm-5.3").unwrap();
+        assert_eq!(comparison.model_id, "zai/glm-5.3");
+        assert_eq!(comparison.identifiers, vec!["z-ai/glm-5.3", "zai/glm-5.3"]);
     }
 
     #[test]
