@@ -683,12 +683,12 @@ The TUI refreshes every 60 seconds. During a refresh it keeps the current values
 visible with a `↻` marker. If the request fails, the last snapshot remains on
 screen and is marked stale.
 
-OpenRouter shows its API-reported purchased-credit balance and per-key usage by
-period. The public credit endpoint exposes lifetime purchased and used totals,
-not the dashboard's credit-grant breakdown, so the TUI does not derive a usage
-bar from those historical values:
+OpenRouter shows its API-reported purchased-credit balance, lifetime purchased
+and used totals, and per-key usage by period. Its bar compares lifetime API
+credits purchased with credits used; dashboard credit grants are not included
+because the public endpoint does not expose their breakdown:
 
-![ai-usagebar-tui showing the OpenRouter tab — API-reported purchased balance, lifetime purchased and used totals, usage by period with today/week/month, and paid tier](screenshots/tui-openrouter.png)
+![ai-usagebar-tui showing the OpenRouter tab — purchased API credit consumption, usage by period with today/week/month, and paid tier](screenshots/tui-openrouter.png)
 
 ### Local context overlay
 

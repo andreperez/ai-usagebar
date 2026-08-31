@@ -328,7 +328,8 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
                 .utilization_pct
                 .max(subscription.seven_day.window.utilization_pct)
         }),
-        VendorSnapshot::VercelGateway(_) | VendorSnapshot::Openrouter(_) => None,
+        VendorSnapshot::VercelGateway(_) => None,
+        VendorSnapshot::Openrouter(s) => Some(s.consumed_pct()),
         VendorSnapshot::Deepseek(_)
         | VendorSnapshot::Kilo(_)
         | VendorSnapshot::Novita(_)
@@ -741,17 +742,28 @@ fn openrouter_sections(s: &crate::usage::OpenRouterSnapshot) -> SectionBuilder {
         right: None,
     }]);
     v.push(Section::Spacer);
-    v.push(Section::Text {
-        label: "API-reported purchased balance".into(),
-        value: usd(s.balance()),
-    });
+    let pct = s.consumed_pct().clamp(0, 100) as u16;
+    v.push_metric(
+        Section::Metric {
+            label: "Purchased API credits".into(),
+            pct,
+            severity: crate::openrouter::vendor::severity(s),
+            value_label: usd(s.balance()),
+            footnote: format!(
+                "{} of {} used ({pct}%)",
+                usd(s.total_usage),
+                usd(s.total_credits)
+            ),
+        },
+        None,
+    );
     v.push(Section::Text {
         label: "Lifetime purchased / used".into(),
         value: format!("{} / {}", usd(s.total_credits), usd(s.total_usage)),
     });
     v.push(Section::Text {
-        label: "Credit grants".into(),
-        value: "not exposed by the public API".into(),
+        label: "Dashboard grants".into(),
+        value: "not included in this API total".into(),
     });
     v.push(Section::Spacer);
     v.push(Section::Block {
@@ -1860,7 +1872,7 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_shows_purchased_balance_without_a_historical_usage_bar() {
+    fn openrouter_shows_purchased_credit_consumption_and_period_usage() {
         let snap = OpenRouterSnapshot {
             label: "OR".into(),
             total_credits: 100.0,
@@ -1874,16 +1886,18 @@ mod tests {
         };
         let sections = sections_for(&ready(VendorSnapshot::Openrouter(snap)), now(), 5);
         assert!(matches!(sections[0], Section::Title { .. }));
-        assert!(!sections.iter().any(|s| matches!(s, Section::Metric { .. })));
         assert!(sections.iter().any(|s| matches!(
             s,
-            Section::Text { label, value }
-                if label == "API-reported purchased balance" && value == "$75.00"
+            Section::Metric { label, pct, value_label, footnote, .. }
+                if label == "Purchased API credits"
+                    && *pct == 25
+                    && value_label == "$75.00"
+                    && footnote == "$25.00 of $100.00 used (25%)"
         )));
         assert!(sections.iter().any(|s| matches!(
             s,
             Section::Text { label, value }
-                if label == "Credit grants" && value == "not exposed by the public API"
+                if label == "Dashboard grants" && value == "not included in this API total"
         )));
         assert!(
             sections
@@ -1893,7 +1907,7 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_debt_stays_signed_without_a_fabricated_percentage() {
+    fn openrouter_debt_stays_signed_with_a_saturated_consumption_bar() {
         let snap = OpenRouterSnapshot {
             label: "OR".into(),
             total_credits: 0.0,
@@ -1908,10 +1922,12 @@ mod tests {
         let sections = sections_for(&ready(VendorSnapshot::Openrouter(snap.clone())), now(), 5);
         assert!(sections.iter().any(|s| matches!(
             s,
-            Section::Text { label, value }
-                if label == "API-reported purchased balance" && value == "-$5.71"
+            Section::Metric { label, pct, value_label, severity, .. }
+                if label == "Purchased API credits"
+                    && *pct == 0
+                    && value_label == "-$5.71"
+                    && *severity == PaceSeverity::Critical
         )));
-        assert!(!sections.iter().any(|s| matches!(s, Section::Metric { .. })));
 
         // ...and the same number in the dense Overview list.
         let (_, cells) = compact_cells(&VendorSnapshot::Openrouter(snap));
@@ -2396,7 +2412,7 @@ mod tests {
             limit: None,
             limit_remaining: None,
         });
-        assert_eq!(headline_pct(&openrouter), None);
+        assert_eq!(headline_pct(&openrouter), Some(88));
     }
 
     #[test]

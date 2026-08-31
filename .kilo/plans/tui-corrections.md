@@ -10,7 +10,7 @@ Clarify provider data sources, reduce detail-panel noise, and make the model-pri
 - [x] Keep only Requesty balance and month-to-date spend/request count in its detail panel.
 - [x] Render both Codex subscription windows in the Overview.
 - [x] Identify the Codex subscription windows separately from OpenAI API credits.
-- [x] Remove the OpenRouter historical-credit gauge and label its API-reported purchased balance accurately.
+- [x] Label the OpenRouter historical-credit gauge as purchased API credit consumption.
 - [x] Document that OpenRouter credit grants are not exposed by the currently used public API endpoints.
 
 ## Phase 2: Period Usage In Details
@@ -23,10 +23,14 @@ Available totals: OpenRouter reports daily, weekly, and monthly API-key usage;
 Requesty and Vercel AI Gateway report month-to-date totals. Other supported
 providers currently expose quota windows or current billing-cycle counters only.
 
-## Follow-up: OpenRouter Adapter Consistency
+## Follow-up: Comparable Credit Bars
 
-- [ ] Remove the historical purchased-credit percentage from Waybar and custom OpenRouter placeholders.
-- [ ] Keep OpenRouter's TUI, widget, and report wording aligned with the public API's purchased-credit scope.
+- [x] Inventory providers for cumulative credited and debited totals.
+- [ ] Add a credit-consumption bar only when a provider exposes both cumulative credited and debited totals.
+- [x] Keep OpenRouter's TUI, widget, and report wording aligned with the purchased-credit scope.
+
+OpenRouter is currently the only provider snapshot with both totals. Firecrawl
+and ZenMux expose limits or balances, not a matching cumulative debit total.
 
 ## Phase 3: Model Price Browser [x]
 
