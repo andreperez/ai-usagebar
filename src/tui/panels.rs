@@ -1332,13 +1332,13 @@ fn requesty_sections(s: &crate::usage::RequestySnapshot) -> SectionBuilder {
         value: crate::format::usd(s.balance),
     });
     if let Some(usage) = &s.usage {
-        sections.push(Section::Text {
-            label: "Month to date".into(),
-            value: format!(
-                "{} · {} requests",
+        sections.push(Section::Block {
+            label: "Usage by period".into(),
+            body: vec![format!(
+                "month to date {} · {} requests",
                 crate::format::usd(usage.mtd_spend),
                 usage.requests
-            ),
+            )],
         });
     }
     sections
@@ -1432,13 +1432,13 @@ fn vercel_gateway_sections(s: &crate::usage::VercelGatewaySnapshot) -> SectionBu
         value: crate::format::usd(s.total_used),
     });
     if let Some(report) = &s.report {
-        sections.push(Section::Text {
-            label: "Month to date".into(),
-            value: format!(
-                "{} · {} requests",
+        sections.push(Section::Block {
+            label: "Usage by period".into(),
+            body: vec![format!(
+                "month to date {} · {} requests",
                 crate::format::usd(report.mtd_cost),
                 report.requests
-            ),
+            )],
         });
         sections.push(Section::Block {
             label: "Tokens".into(),

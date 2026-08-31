@@ -13,11 +13,11 @@ Clarify provider data sources, reduce detail-panel noise, and make the model-pri
 - [x] Label the OpenRouter historical-credit gauge as purchased API credit consumption.
 - [x] Document that OpenRouter credit grants are not exposed by the currently used public API endpoints.
 
-## Phase 2: Period Usage In Details
+## Phase 2: Period Usage In Details [x]
 
 - [x] Inventory period totals already exposed by each provider snapshot.
-- [ ] Add concise period usage blocks where the provider API supplies trustworthy daily, weekly, monthly, or billing-cycle totals.
-- [ ] Do not invent periods or derive totals from quota percentages.
+- [x] Add concise period usage blocks where the provider API supplies trustworthy daily, weekly, monthly, or billing-cycle totals.
+- [x] Do not invent periods or derive totals from quota percentages.
 
 Available totals: OpenRouter reports daily, weekly, and monthly API-key usage;
 Requesty and Vercel AI Gateway report month-to-date totals. Other supported

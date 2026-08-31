@@ -757,9 +757,9 @@ mod tests {
         assert_eq!(entry["plan"], "Requesty");
         assert!(entry["metrics"].as_array().unwrap().is_empty());
         assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
-            section["type"] == "text"
-                && section["label"] == "Month to date"
-                && section["value"] == "$3.75 · 17 requests"
+            section["type"] == "block"
+                && section["label"] == "Usage by period"
+                && section["body"][0] == "month to date $3.75 · 17 requests"
         }));
     }
 
@@ -857,9 +857,9 @@ mod tests {
         assert_eq!(entry["display_name"], "Vercel AI Gateway");
         assert!(entry["metrics"].as_array().unwrap().is_empty());
         assert!(entry["sections"].as_array().unwrap().iter().any(|section| {
-            section["type"] == "text"
-                && section["label"] == "Month to date"
-                && section["value"] == "$1.25 · 2 requests"
+            section["type"] == "block"
+                && section["label"] == "Usage by period"
+                && section["body"][0] == "month to date $1.25 · 2 requests"
         }));
     }
 
