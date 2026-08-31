@@ -591,8 +591,8 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(
         Paragraph::new(bubble.muted(format!(
-            " F2 / click: order {} · name · best price · provider",
-            state.sort.label()
+            " F2 primary · F3 secondary · F4 direction · {}",
+            state.sort.description()
         ))),
         search_row[1],
     );
@@ -603,7 +603,7 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
         hit.price_sort = Some(search_row[1]);
     }
     let mut lines = vec![Line::from(bubble.muted(
-        " Type to filter exact model IDs · F2 / click changes order · bold green values are cheapest in this family",
+        " Type to filter exact model IDs · F2/F3 choose sort keys · F4 toggles direction · bold green values are cheapest",
     ))];
     match &state.load {
         PricePanelState::Loading => lines.push(Line::from(
@@ -649,7 +649,7 @@ fn push_price_family(
         bubble.focused_border.add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(bubble.muted(format!(
-        "  Family across {} gateways · best input {} · best output {}",
+        "  Family across {} gateways · best input {} · best output {} · best overall average",
         comparison.prices.len(),
         comparison.input_winner.label(),
         comparison.output_winner.label()
@@ -661,14 +661,21 @@ fn push_price_family(
         ))));
     }
     for price in &comparison.prices {
-        let overall_tie = comparison.overall_winners.contains(&price.gateway);
-        let every_gateway_tied = comparison.overall_winners.len() == comparison.prices.len();
-        let partial_best_value = overall_tie && !every_gateway_tied;
-        let input_winner =
-            !every_gateway_tied && (partial_best_value || price.gateway == comparison.input_winner);
-        let output_winner = !every_gateway_tied
-            && (partial_best_value || price.gateway == comparison.output_winner);
-        let overall_winner = comparison.overall_winner == Some(price.gateway);
+        let input_winner = price.input_per_million
+            == comparison
+                .prices
+                .iter()
+                .map(|candidate| candidate.input_per_million)
+                .min_by(f64::total_cmp)
+                .unwrap_or(f64::INFINITY);
+        let output_winner = price.output_per_million
+            == comparison
+                .prices
+                .iter()
+                .map(|candidate| candidate.output_per_million)
+                .min_by(f64::total_cmp)
+                .unwrap_or(f64::INFINITY);
+        let overall_winner = comparison.overall_winners.contains(&price.gateway);
         let mut spans = vec![
             Span::styled(format!("  {:<20}", price.gateway.label()), bubble.text),
             Span::styled(
@@ -679,22 +686,26 @@ fn push_price_family(
                 format!(" · ${:.4}/M output", price.output_per_million),
                 if output_winner { winner } else { bubble.muted },
             ),
+            Span::styled(
+                format!(" · ${:.4}/M avg", price.average_per_million()),
+                if overall_winner { winner } else { bubble.muted },
+            ),
         ];
         if comparison.identifiers.len() > 1 {
             spans.push(bubble.muted(format!("  [{}]", price.model_id)));
         }
+        let mut labels = Vec::new();
+        if input_winner {
+            labels.push("BEST INPUT");
+        }
+        if output_winner {
+            labels.push("BEST OUTPUT");
+        }
         if overall_winner {
-            spans.push(Span::styled("  BEST OVERALL", winner));
-        } else if partial_best_value {
-            spans.push(Span::styled("  BEST VALUE", winner));
-        } else if input_winner || output_winner {
-            let label = match (input_winner, output_winner) {
-                (true, true) => "  BEST INPUT + OUTPUT",
-                (true, false) => "  BEST INPUT",
-                (false, true) => "  BEST OUTPUT",
-                (false, false) => unreachable!(),
-            };
-            spans.push(Span::styled(label, winner));
+            labels.push("BEST OVERALL");
+        }
+        if !labels.is_empty() {
+            spans.push(Span::styled(format!("  {}", labels.join(" · ")), winner));
         }
         lines.push(Line::from(spans));
     }
@@ -1116,7 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn price_family_hides_best_value_when_every_gateway_is_equal() {
+    fn price_family_marks_every_gateway_when_averages_are_equal() {
         use crate::prices::{Gateway, PriceComparison, PriceRowOwned};
 
         let price = |gateway| PriceRowOwned {
@@ -1139,12 +1150,12 @@ mod tests {
         let mut lines = Vec::new();
         push_price_family(&mut lines, &comparison, &bubble);
 
-        assert!(!lines[2].to_string().contains("BEST"));
-        assert!(!lines[3].to_string().contains("BEST"));
+        assert!(lines[2].to_string().contains("BEST OVERALL"));
+        assert!(lines[3].to_string().contains("BEST OVERALL"));
     }
 
     #[test]
-    fn price_family_marks_each_partial_tie_as_best_value() {
+    fn price_family_marks_each_lowest_average_tie_as_best_overall() {
         use crate::prices::{Gateway, PriceComparison, PriceRowOwned};
 
         let price = |gateway, input, output| PriceRowOwned {
@@ -1171,8 +1182,8 @@ mod tests {
         let mut lines = Vec::new();
         push_price_family(&mut lines, &comparison, &bubble);
 
-        assert!(lines[2].to_string().contains("BEST VALUE"));
-        assert!(lines[3].to_string().contains("BEST VALUE"));
-        assert!(!lines[4].to_string().contains("BEST VALUE"));
+        assert!(lines[2].to_string().contains("BEST OVERALL"));
+        assert!(lines[3].to_string().contains("BEST OVERALL"));
+        assert!(!lines[4].to_string().contains("BEST OVERALL"));
     }
 }

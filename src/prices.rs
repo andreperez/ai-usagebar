@@ -86,10 +86,11 @@ pub async fn run(json: bool, model: Option<&str>) -> i32 {
                     }
                     for price in comparison.prices {
                         println!(
-                            "  {}: input ${:.4}/M, output ${:.4}/M",
+                            "  {}: input ${:.4}/M, output ${:.4}/M, average ${:.4}/M",
                             price.gateway.label(),
                             price.input_per_million,
-                            price.output_per_million
+                            price.output_per_million,
+                            price.average_per_million(),
                         );
                     }
                 }
@@ -182,8 +183,7 @@ pub struct PriceComparison {
     pub output_winner: Gateway,
     pub overall_winner: Option<Gateway>,
     pub overall_tied: bool,
-    /// Gateways with the same dominant input/output pair. A tie can include
-    /// every gateway (identical prices) or only a cheaper subset.
+    /// Gateways tied for the lowest average of default input and output prices.
     pub overall_winners: Vec<Gateway>,
     pub prices: Vec<PriceRowOwned>,
 }
@@ -194,6 +194,12 @@ pub struct PriceRowOwned {
     pub input_per_million: f64,
     pub output_per_million: f64,
     pub model_id: String,
+}
+
+impl PriceRowOwned {
+    pub fn average_per_million(&self) -> f64 {
+        (self.input_per_million + self.output_per_million) / 2.0
+    }
 }
 
 fn owned(comparison: Comparison<'_>) -> PriceComparison {
@@ -361,13 +367,15 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
         .iter()
         .min_by(|a, b| a.output_per_token.total_cmp(&b.output_per_token))?
         .gateway;
+    let lowest_average = matching
+        .iter()
+        .map(|price| (price.input_per_token + price.output_per_token) / 2.0)
+        .min_by(f64::total_cmp)?;
     let overall_winners: Vec<_> = matching
         .iter()
-        .filter(|candidate| {
-            matching.iter().all(|other| {
-                candidate.input_per_token <= other.input_per_token
-                    && candidate.output_per_token <= other.output_per_token
-            })
+        .filter(|price| {
+            ((price.input_per_token + price.output_per_token) / 2.0).total_cmp(&lowest_average)
+                == std::cmp::Ordering::Equal
         })
         .map(|price| price.gateway)
         .collect();
@@ -439,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_model_id_comparison_keeps_separate_input_and_output_winners() {
+    fn exact_model_id_comparison_uses_average_for_overall_winner() {
         let prices = [
             price(Gateway::Requesty, 2e-6, 8e-6),
             price(Gateway::OpenRouter, 3e-6, 6e-6),
@@ -447,11 +455,11 @@ mod tests {
         let comparison = compare(&prices, "openai/gpt-test").unwrap();
         assert_eq!(comparison.input_winner, Gateway::Requesty);
         assert_eq!(comparison.output_winner, Gateway::OpenRouter);
-        assert_eq!(comparison.overall_winner, None);
+        assert_eq!(comparison.overall_winner, Some(Gateway::OpenRouter));
     }
 
     #[test]
-    fn dominant_gateway_is_the_only_overall_winner() {
+    fn lowest_average_gateway_is_the_only_overall_winner() {
         let prices = [
             price(Gateway::Requesty, 2e-6, 6e-6),
             price(Gateway::OpenRouter, 3e-6, 7e-6),
@@ -496,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_equal_best_values_keep_every_winner() {
+    fn equal_lowest_averages_keep_every_overall_winner() {
         let prices = [
             price(Gateway::KiloGateway, 2e-6, 6e-6),
             price(Gateway::OpenRouter, 2e-6, 6e-6),

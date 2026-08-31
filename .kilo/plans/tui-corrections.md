@@ -23,18 +23,23 @@ Available totals: OpenRouter reports daily, weekly, and monthly API-key usage;
 Requesty and Vercel AI Gateway report month-to-date totals. Other supported
 providers currently expose quota windows or current billing-cycle counters only.
 
-## Phase 3: Model Price Browser
+## Follow-up: OpenRouter Adapter Consistency
 
-- [ ] Add an input/output average column for every gateway price row.
-- [ ] Define `BEST OVERALL` from the lowest average price, with explicit ties.
-- [ ] Replace the single cycling sort with visible ordered sort keys and directions.
-- [ ] Support multiple sort keys, such as name then average price or average price then name.
+- [ ] Remove the historical purchased-credit percentage from Waybar and custom OpenRouter placeholders.
+- [ ] Keep OpenRouter's TUI, widget, and report wording aligned with the public API's purchased-credit scope.
+
+## Phase 3: Model Price Browser [x]
+
+- [x] Add an input/output average column for every gateway price row.
+- [x] Define `BEST OVERALL` from the lowest average price, with explicit ties.
+- [x] Replace the single cycling sort with visible ordered sort keys and directions.
+- [x] Support multiple sort keys, such as name then average price or average price then name.
 
 ## Verification
 
-- [ ] Add focused panel, Overview, and price-browser tests for each completed phase.
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo test --all-targets --locked`.
-- [ ] Run `cargo clippy --all-targets --locked -- -D warnings`.
-- [ ] Run `make desktop-test`.
-- [ ] Run `cargo machete`.
+- [x] Add focused panel, Overview, and price-browser tests for each completed phase.
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo test --all-targets --locked`.
+- [x] Run `cargo clippy --all-targets --locked -- -D warnings`.
+- [x] Run `make desktop-test`.
+- [x] Run `cargo machete`.

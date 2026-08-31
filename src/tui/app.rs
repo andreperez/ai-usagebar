@@ -1,5 +1,6 @@
 //! TUI app state — vendors, tab selection, per-vendor snapshot cache.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -46,27 +47,80 @@ pub struct PriceScreenState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PriceSort {
+pub enum PriceSortField {
     Name,
-    Price,
+    Average,
+    Input,
+    Output,
     Provider,
 }
 
-impl PriceSort {
+impl PriceSortField {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Name => "name",
-            Self::Price => "best price",
+            Self::Average => "average",
+            Self::Input => "input",
+            Self::Output => "output",
             Self::Provider => "provider",
         }
     }
 
     pub const fn next(self) -> Self {
         match self {
-            Self::Name => Self::Price,
-            Self::Price => Self::Provider,
+            Self::Name => Self::Average,
+            Self::Average => Self::Input,
+            Self::Input => Self::Output,
+            Self::Output => Self::Provider,
             Self::Provider => Self::Name,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriceSortKey {
+    pub field: PriceSortField,
+    pub descending: bool,
+}
+
+impl PriceSortKey {
+    fn label(self) -> String {
+        format!(
+            "{} {}",
+            self.field.label(),
+            if self.descending { "↓" } else { "↑" }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriceSort {
+    pub primary: PriceSortKey,
+    pub secondary: Option<PriceSortKey>,
+}
+
+impl Default for PriceSort {
+    fn default() -> Self {
+        Self {
+            primary: PriceSortKey {
+                field: PriceSortField::Name,
+                descending: false,
+            },
+            secondary: Some(PriceSortKey {
+                field: PriceSortField::Average,
+                descending: false,
+            }),
+        }
+    }
+}
+
+impl PriceSort {
+    pub fn description(self) -> String {
+        let secondary = self
+            .secondary
+            .map(PriceSortKey::label)
+            .unwrap_or_else(|| "off".into());
+        format!("1 {} · 2 {secondary}", self.primary.label())
     }
 }
 
@@ -75,7 +129,7 @@ impl PriceScreenState {
         Self {
             load: PricePanelState::Loading,
             query: String::new(),
-            sort: PriceSort::Name,
+            sort: PriceSort::default(),
             scroll: 0,
         }
     }
@@ -96,19 +150,16 @@ impl PriceScreenState {
                         .any(|identifier| identifier.to_ascii_lowercase().contains(&query))
             })
             .collect();
-        match self.sort {
-            PriceSort::Name => matching.sort_by(|left, right| left.model_id.cmp(&right.model_id)),
-            PriceSort::Price => matching.sort_by(|left, right| {
-                best_price(left)
-                    .total_cmp(&best_price(right))
-                    .then_with(|| left.model_id.cmp(&right.model_id))
-            }),
-            PriceSort::Provider => matching.sort_by(|left, right| {
-                first_provider(left)
-                    .cmp(first_provider(right))
-                    .then_with(|| left.model_id.cmp(&right.model_id))
-            }),
-        }
+        matching.sort_by(|left, right| {
+            compare_sort_key(left, right, self.sort.primary)
+                .then_with(|| {
+                    self.sort
+                        .secondary
+                        .map(|key| compare_sort_key(left, right, key))
+                        .unwrap_or(Ordering::Equal)
+                })
+                .then_with(|| left.model_id.cmp(&right.model_id))
+        });
         matching
     }
 
@@ -130,19 +181,82 @@ impl PriceScreenState {
         self.scroll = self.matching_comparisons().len().saturating_sub(1);
     }
 
-    pub fn cycle_sort(&mut self) {
-        self.sort = self.sort.next();
+    pub fn cycle_primary_sort(&mut self) {
+        self.sort.primary.field = self.sort.primary.field.next();
+        self.reset_scroll();
+    }
+
+    pub fn cycle_secondary_sort(&mut self) {
+        self.sort.secondary = match self.sort.secondary {
+            Some(key) if key.field == PriceSortField::Provider => None,
+            Some(mut key) => {
+                key.field = key.field.next();
+                Some(key)
+            }
+            None => Some(PriceSortKey {
+                field: PriceSortField::Name,
+                descending: false,
+            }),
+        };
+        self.reset_scroll();
+    }
+
+    pub fn toggle_sort_direction(&mut self, secondary: bool) {
+        if secondary {
+            if let Some(key) = &mut self.sort.secondary {
+                key.descending = !key.descending;
+            }
+        } else {
+            self.sort.primary.descending = !self.sort.primary.descending;
+        }
         self.reset_scroll();
     }
 }
 
-fn best_price(comparison: &crate::prices::PriceComparison) -> f64 {
+fn lowest_average(comparison: &crate::prices::PriceComparison) -> f64 {
     comparison
         .prices
         .iter()
-        .map(|price| price.input_per_million + price.output_per_million)
+        .map(crate::prices::PriceRowOwned::average_per_million)
         .min_by(|left, right| left.total_cmp(right))
         .unwrap_or(f64::INFINITY)
+}
+
+fn lowest_input(comparison: &crate::prices::PriceComparison) -> f64 {
+    comparison
+        .prices
+        .iter()
+        .map(|price| price.input_per_million)
+        .min_by(f64::total_cmp)
+        .unwrap_or(f64::INFINITY)
+}
+
+fn lowest_output(comparison: &crate::prices::PriceComparison) -> f64 {
+    comparison
+        .prices
+        .iter()
+        .map(|price| price.output_per_million)
+        .min_by(f64::total_cmp)
+        .unwrap_or(f64::INFINITY)
+}
+
+fn compare_sort_key(
+    left: &crate::prices::PriceComparison,
+    right: &crate::prices::PriceComparison,
+    key: PriceSortKey,
+) -> Ordering {
+    let order = match key.field {
+        PriceSortField::Name => left.model_id.cmp(&right.model_id),
+        PriceSortField::Average => lowest_average(left).total_cmp(&lowest_average(right)),
+        PriceSortField::Input => lowest_input(left).total_cmp(&lowest_input(right)),
+        PriceSortField::Output => lowest_output(left).total_cmp(&lowest_output(right)),
+        PriceSortField::Provider => first_provider(left).cmp(first_provider(right)),
+    };
+    if key.descending {
+        order.reverse()
+    } else {
+        order
+    }
 }
 
 fn first_provider(comparison: &crate::prices::PriceComparison) -> &str {
@@ -1115,7 +1229,7 @@ mod tests {
                 price_comparison("anthropic/claude-opus"),
             ]),
             query: "claude".into(),
-            sort: PriceSort::Name,
+            sort: PriceSort::default(),
             scroll: 0,
         };
         assert_eq!(screen.matching_comparisons().len(), 2);
@@ -1126,6 +1240,39 @@ mod tests {
         screen.query = "missing".into();
         screen.scroll_by(1);
         assert_eq!(screen.scroll, 0);
+    }
+
+    #[test]
+    fn price_screen_applies_primary_secondary_and_directional_sort_keys() {
+        let mut lower = price_comparison("same/model");
+        lower.prices[0].input_per_million = 1.0;
+        lower.prices[0].output_per_million = 3.0;
+        let mut higher = price_comparison("same/model-alt");
+        higher.prices[0].input_per_million = 2.0;
+        higher.prices[0].output_per_million = 6.0;
+        let mut screen = PriceScreenState {
+            load: PricePanelState::Ready(vec![higher, lower]),
+            query: String::new(),
+            sort: PriceSort {
+                primary: PriceSortKey {
+                    field: PriceSortField::Average,
+                    descending: false,
+                },
+                secondary: Some(PriceSortKey {
+                    field: PriceSortField::Name,
+                    descending: false,
+                }),
+            },
+            scroll: 0,
+        };
+        assert_eq!(screen.matching_comparisons()[0].model_id, "same/model");
+        screen.toggle_sort_direction(false);
+        assert_eq!(screen.matching_comparisons()[0].model_id, "same/model-alt");
+        screen.cycle_secondary_sort();
+        assert_eq!(
+            screen.sort.secondary.unwrap().field,
+            PriceSortField::Average
+        );
     }
 
     // Use `App::with_theme(.., Theme::default())` rather than `App::new`, which

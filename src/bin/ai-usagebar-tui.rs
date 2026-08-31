@@ -576,7 +576,15 @@ fn handle_price_key(screen: &mut PriceScreenState, code: KeyCode, modifiers: Key
     match code {
         KeyCode::Esc => true,
         KeyCode::F(2) => {
-            screen.cycle_sort();
+            screen.cycle_primary_sort();
+            false
+        }
+        KeyCode::F(3) => {
+            screen.cycle_secondary_sort();
+            false
+        }
+        KeyCode::F(4) => {
+            screen.toggle_sort_direction(modifiers.contains(KeyModifiers::SHIFT));
             false
         }
         KeyCode::Backspace => {
@@ -636,7 +644,7 @@ fn handle_mouse(app: &mut App, m: &event::MouseEvent) -> Option<MouseAction> {
                     .price_sort
                     .is_some_and(|rect| rect.contains(pos))
                 {
-                    screen.cycle_sort();
+                    screen.cycle_primary_sort();
                 }
             }
             _ => {}
@@ -807,7 +815,7 @@ mod tests {
                 comparison("openai/gpt-test"),
             ]),
             query: String::new(),
-            sort: ai_usagebar::tui::app::PriceSort::Name,
+            sort: ai_usagebar::tui::app::PriceSort::default(),
             scroll: 0,
         };
         handle_price_key(&mut screen, KeyCode::Char('c'), KeyModifiers::NONE);
@@ -825,7 +833,17 @@ mod tests {
         assert_eq!(screen.scroll, 0);
         screen.query.clear();
         handle_price_key(&mut screen, KeyCode::F(2), KeyModifiers::NONE);
-        assert_eq!(screen.sort, ai_usagebar::tui::app::PriceSort::Price);
+        assert_eq!(
+            screen.sort.primary.field,
+            ai_usagebar::tui::app::PriceSortField::Average
+        );
+        handle_price_key(&mut screen, KeyCode::F(3), KeyModifiers::NONE);
+        assert_eq!(
+            screen.sort.secondary.unwrap().field,
+            ai_usagebar::tui::app::PriceSortField::Input
+        );
+        handle_price_key(&mut screen, KeyCode::F(4), KeyModifiers::NONE);
+        assert!(screen.sort.primary.descending);
         handle_price_key(&mut screen, KeyCode::Down, KeyModifiers::NONE);
         assert_eq!(screen.scroll, 1);
         assert!(handle_price_key(
@@ -874,7 +892,7 @@ mod tests {
                 },
             ]),
             query: String::new(),
-            sort: ai_usagebar::tui::app::PriceSort::Name,
+            sort: ai_usagebar::tui::app::PriceSort::default(),
             scroll: 0,
         });
         let wheel = event::MouseEvent {
