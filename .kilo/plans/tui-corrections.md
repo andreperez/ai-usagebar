@@ -26,7 +26,7 @@ providers currently expose quota windows or current billing-cycle counters only.
 ## Follow-up: Comparable Credit Bars
 
 - [x] Inventory providers for cumulative credited and debited totals.
-- [ ] Add a credit-consumption bar only when a provider exposes both cumulative credited and debited totals.
+- [x] Add a credit-consumption bar when a provider exposes both cumulative credited and debited totals.
 - [x] Keep OpenRouter's TUI, widget, and report wording aligned with the purchased-credit scope.
 
 OpenRouter is currently the only provider snapshot with both totals. Firecrawl

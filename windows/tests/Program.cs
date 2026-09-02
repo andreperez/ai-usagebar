@@ -5,6 +5,7 @@ var tests = new (string Name, Action Body)[] {
     ("parses ordered report sections", ParsesOrderedReportSections),
     ("selects configured primary entry", SelectsConfiguredPrimaryEntry),
     ("falls back to first ready entry", FallsBackToFirstReadyEntry),
+    ("normalizes repeated provider titles", NormalizesRepeatedProviderTitles),
     ("rejects missing entries", RejectsMissingEntries),
 };
 
@@ -50,6 +51,16 @@ static void FallsBackToFirstReadyEntry()
         {"primary":"missing","entries":[{"id":"error","display_name":"Error","short_name":"err","status":"error","stale":false,"sections":[]},{"id":"ready","display_name":"Ready","short_name":"rdy","status":"ready","stale":false,"sections":[]}]}
         """);
     Assert(UsageReportParser.SelectPrimary(report)?.Id == "ready", "first ready fallback");
+}
+
+static void NormalizesRepeatedProviderTitles()
+{
+    var report = UsageReportParser.Parse("""
+        {"primary":"requesty","entries":[{"id":"requesty","display_name":"Requesty","short_name":"rqt","plan":"Requesty","status":"ready","stale":false,"sections":[]},{"id":"openrouter","display_name":"OpenRouter","short_name":"or","plan":"OpenRouter · work","status":"ready","stale":false,"sections":[]},{"id":"openai","display_name":"Codex","short_name":"gpt","plan":"ChatGPT Plus","status":"ready","stale":false,"sections":[]}]}
+        """);
+    Assert(report.Entries[0].Title == "Requesty", "repeated title");
+    Assert(report.Entries[1].Title == "OpenRouter · work", "account title");
+    Assert(report.Entries[2].Title == "Codex - ChatGPT Plus", "plan title");
 }
 
 static void RejectsMissingEntries()

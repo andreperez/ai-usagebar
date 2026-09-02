@@ -17,7 +17,24 @@ public sealed record UsageEntry(
     [property: JsonPropertyName("error")] string? Error,
     [property: JsonPropertyName("stale")] bool Stale,
     [property: JsonPropertyName("fetched_at")] DateTimeOffset? FetchedAt,
-    [property: JsonPropertyName("sections")] JsonElement Sections);
+    [property: JsonPropertyName("sections")] JsonElement Sections)
+{
+    public string Title
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Plan) || string.Equals(Plan, DisplayName, StringComparison.Ordinal))
+            {
+                return DisplayName;
+            }
+
+            return Plan.StartsWith($"{DisplayName} · ", StringComparison.Ordinal)
+                || Plan.StartsWith($"{DisplayName} — ", StringComparison.Ordinal)
+                ? Plan
+                : $"{DisplayName} - {Plan}";
+        }
+    }
+}
 
 public static class UsageReportParser
 {

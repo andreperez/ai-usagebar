@@ -111,7 +111,7 @@ public partial class MainWindow : Window
         }
 
         Details.Children.Add(new TextBlock {
-            Text = entry.Plan is { Length: > 0 } ? $"{entry.DisplayName} - {entry.Plan}" : entry.DisplayName,
+            Text = entry.Title,
             FontSize = 20,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 0, 0, 12),
