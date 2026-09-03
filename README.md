@@ -393,13 +393,15 @@ takes it from the report instead of keeping its own table.
 
 `ai-usagebar prices` compares published model catalog prices from Kilo Gateway,
 OpenRouter, Requesty, and Vercel AI Gateway. It compares only exact model identifiers and
-reports input and output winners independently; a single overall winner appears
-only when one gateway is no more expensive for both prices.
+reports input and output winners independently. `BEST OVERALL` uses the lowest
+arithmetic mean of the two default prices. Published cache-read input prices are
+shown separately when available; they do not change that mean because actual
+cost depends on each request's cache-hit ratio.
 
 Catalogs refresh independently every six hours. Kilo, OpenRouter, and Vercel catalogs
 are public; Requesty uses its configured key when available so the catalog can
 reflect models approved for that organization. Tiered, regional, time-based,
-cache, request, image, and web-search prices remain outside the default winner
+request, image, and web-search prices remain outside the default winner
 calculation because they are not directly comparable to a base token price.
 
 ## Standalone TUI
@@ -666,7 +668,8 @@ make clippy                                        # cargo clippy -D warnings
 - `p` — open the full-screen model-price browser; type immediately to filter
   exact model IDs, `Backspace` clears text, `F2` cycles the primary sort key,
   `F3` cycles the secondary key, `F4` toggles primary direction, `Shift+F4`
-  toggles secondary direction, `↑` / `↓`, `PgUp` / `PgDn`, `Home` / `End`, or
+  toggles secondary direction, `F5` shows or hides published cache-read prices,
+  `↑` / `↓`, `PgUp` / `PgDn`, `Home` / `End`, or
   the mouse wheel scroll model families, and `Esc` returns to the dashboard
 - `c` — open local Claude context sessions (only when `[context] enabled = true`); `v` cycles its layout
 - `q` / `Esc` / `Ctrl-C` — quit

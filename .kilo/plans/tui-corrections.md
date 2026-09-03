@@ -38,6 +38,8 @@ and ZenMux expose limits or balances, not a matching cumulative debit total.
 - [x] Define `BEST OVERALL` from the lowest average price, with explicit ties.
 - [x] Replace the single cycling sort with visible ordered sort keys and directions.
 - [x] Support multiple sort keys, such as name then average price or average price then name.
+- [x] Show published cache-read input prices separately without folding them into the base-price average.
+- [x] Hide cache-read prices by default and toggle them with `F5`.
 
 ## Verification
 

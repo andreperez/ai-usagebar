@@ -587,6 +587,10 @@ fn handle_price_key(screen: &mut PriceScreenState, code: KeyCode, modifiers: Key
             screen.toggle_sort_direction(modifiers.contains(KeyModifiers::SHIFT));
             false
         }
+        KeyCode::F(5) => {
+            screen.toggle_cached_prices();
+            false
+        }
         KeyCode::Backspace => {
             screen.query.pop();
             screen.reset_scroll();
@@ -806,6 +810,7 @@ mod tests {
                 gateway: Gateway::KiloGateway,
                 input_per_million: 1.0,
                 output_per_million: 1.0,
+                cached_input_per_million: None,
                 model_id: id.into(),
             }],
         };
@@ -816,6 +821,7 @@ mod tests {
             ]),
             query: String::new(),
             sort: ai_usagebar::tui::app::PriceSort::default(),
+            show_cached: false,
             scroll: 0,
         };
         handle_price_key(&mut screen, KeyCode::Char('c'), KeyModifiers::NONE);
@@ -844,6 +850,8 @@ mod tests {
         );
         handle_price_key(&mut screen, KeyCode::F(4), KeyModifiers::NONE);
         assert!(screen.sort.primary.descending);
+        handle_price_key(&mut screen, KeyCode::F(5), KeyModifiers::NONE);
+        assert!(screen.show_cached);
         handle_price_key(&mut screen, KeyCode::Down, KeyModifiers::NONE);
         assert_eq!(screen.scroll, 1);
         assert!(handle_price_key(
@@ -872,6 +880,7 @@ mod tests {
                         gateway: Gateway::KiloGateway,
                         input_per_million: 1.0,
                         output_per_million: 1.0,
+                        cached_input_per_million: None,
                         model_id: "one/model".into(),
                     }],
                 },
@@ -887,12 +896,14 @@ mod tests {
                         gateway: Gateway::KiloGateway,
                         input_per_million: 1.0,
                         output_per_million: 1.0,
+                        cached_input_per_million: None,
                         model_id: "two/model".into(),
                     }],
                 },
             ]),
             query: String::new(),
             sort: ai_usagebar::tui::app::PriceSort::default(),
+            show_cached: false,
             scroll: 0,
         });
         let wheel = event::MouseEvent {

@@ -42,6 +42,7 @@ pub struct PriceScreenState {
     pub load: PricePanelState,
     pub query: String,
     pub sort: PriceSort,
+    pub show_cached: bool,
     /// First matching model-family index to render.
     pub scroll: usize,
 }
@@ -130,6 +131,7 @@ impl PriceScreenState {
             load: PricePanelState::Loading,
             query: String::new(),
             sort: PriceSort::default(),
+            show_cached: false,
             scroll: 0,
         }
     }
@@ -210,6 +212,10 @@ impl PriceScreenState {
             self.sort.primary.descending = !self.sort.primary.descending;
         }
         self.reset_scroll();
+    }
+
+    pub fn toggle_cached_prices(&mut self) {
+        self.show_cached = !self.show_cached;
     }
 }
 
@@ -1208,12 +1214,14 @@ mod tests {
                     gateway: Gateway::KiloGateway,
                     input_per_million: 1.0,
                     output_per_million: 5.0,
+                    cached_input_per_million: None,
                     model_id: model_id.into(),
                 },
                 PriceRowOwned {
                     gateway: Gateway::VercelAiGateway,
                     input_per_million: 2.0,
                     output_per_million: 4.0,
+                    cached_input_per_million: None,
                     model_id: model_id.into(),
                 },
             ],
@@ -1230,6 +1238,7 @@ mod tests {
             ]),
             query: "claude".into(),
             sort: PriceSort::default(),
+            show_cached: false,
             scroll: 0,
         };
         assert_eq!(screen.matching_comparisons().len(), 2);
@@ -1263,6 +1272,7 @@ mod tests {
                     descending: false,
                 }),
             },
+            show_cached: false,
             scroll: 0,
         };
         assert_eq!(screen.matching_comparisons()[0].model_id, "same/model");

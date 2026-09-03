@@ -22,6 +22,7 @@ pub struct ModelPrice {
     pub gateway: Gateway,
     pub input_per_token: f64,
     pub output_per_token: f64,
+    pub cached_input_per_token: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -61,6 +62,7 @@ struct PriceRow<'a> {
     gateway: Gateway,
     input_per_million: f64,
     output_per_million: f64,
+    cached_input_per_million: Option<f64>,
     model_id: &'a str,
 }
 
@@ -85,8 +87,12 @@ pub async fn run(json: bool, model: Option<&str>) -> i32 {
                         None => println!("  Cheapest overall: none (input/output tradeoff)"),
                     }
                     for price in comparison.prices {
+                        let cached = price
+                            .cached_input_per_million
+                            .map(|value| format!(", cached ${value:.4}/M"))
+                            .unwrap_or_default();
                         println!(
-                            "  {}: input ${:.4}/M, output ${:.4}/M, average ${:.4}/M",
+                            "  {}: input ${:.4}/M, output ${:.4}/M, average ${:.4}/M{cached}",
                             price.gateway.label(),
                             price.input_per_million,
                             price.output_per_million,
@@ -193,6 +199,7 @@ pub struct PriceRowOwned {
     pub gateway: Gateway,
     pub input_per_million: f64,
     pub output_per_million: f64,
+    pub cached_input_per_million: Option<f64>,
     pub model_id: String,
 }
 
@@ -218,6 +225,7 @@ fn owned(comparison: Comparison<'_>) -> PriceComparison {
                 gateway: price.gateway,
                 input_per_million: price.input_per_million,
                 output_per_million: price.output_per_million,
+                cached_input_per_million: price.cached_input_per_million,
                 model_id: price.model_id.into(),
             })
             .collect(),
@@ -327,6 +335,13 @@ fn parse_catalog(bytes: &[u8], gateway: Gateway) -> Result<Vec<ModelPrice>> {
                 ))
             };
             let (input_per_token, output_per_token) = prices?;
+            let cached_input_per_token = parse_price(
+                model
+                    .pricing
+                    .get("input_cache_read")
+                    .or_else(|| model.pricing.get("cache_read")),
+            )
+            .filter(|price| price.is_finite() && *price >= 0.0);
             (input_per_token.is_finite()
                 && output_per_token.is_finite()
                 && input_per_token >= 0.0
@@ -337,6 +352,7 @@ fn parse_catalog(bytes: &[u8], gateway: Gateway) -> Result<Vec<ModelPrice>> {
                 gateway,
                 input_per_token,
                 output_per_token,
+                cached_input_per_token,
             })
         })
         .collect::<Vec<_>>())
@@ -405,6 +421,9 @@ fn compare<'a>(prices: &'a [ModelPrice], model: &str) -> Option<Comparison<'a>> 
                 gateway: price.gateway,
                 input_per_million: price.input_per_token * 1_000_000.0,
                 output_per_million: price.output_per_token * 1_000_000.0,
+                cached_input_per_million: price
+                    .cached_input_per_token
+                    .map(|value| value * 1_000_000.0),
                 model_id: &price.model_id,
             })
             .collect(),
@@ -443,6 +462,7 @@ mod tests {
             gateway,
             input_per_token: input,
             output_per_token: output,
+            cached_input_per_token: None,
         }
     }
 
@@ -522,7 +542,7 @@ mod tests {
     #[test]
     fn catalogs_parse_documented_default_prices_without_model_aliases() {
         let openrouter = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"prompt":"0.000002","completion":"0.000006"}}]}"#, Gateway::OpenRouter).unwrap();
-        let kilo = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"prompt":"0.000004","completion":"0.000008"}}]}"#, Gateway::KiloGateway).unwrap();
+        let kilo = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"prompt":"0.000004","completion":"0.000008","input_cache_read":"0.0000002"}}]}"#, Gateway::KiloGateway).unwrap();
         let vercel = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":{"input":"0.000003","output":"0.000005"}}]}"#, Gateway::VercelAiGateway).unwrap();
         let requesty = parse_catalog(br#"{"data":[{"id":"openai/gpt-test","pricing":[{"prompt_tokens_threshold":0,"input_price":0.000001,"output_price":0.000007},{"prompt_tokens_threshold":200000,"input_price":0.000002,"output_price":0.000008}]}]}"#, Gateway::Requesty).unwrap();
         let prices = [
@@ -535,6 +555,16 @@ mod tests {
         assert_eq!(comparison.input_winner, Gateway::Requesty);
         assert_eq!(comparison.output_winner, Gateway::VercelAiGateway);
         assert_eq!(comparison.overall_winner, None);
+        let kilo = comparison
+            .prices
+            .iter()
+            .find(|price| price.gateway == Gateway::KiloGateway)
+            .unwrap();
+        assert!(
+            (kilo.cached_input_per_million.unwrap() - 0.2).abs() < f64::EPSILON,
+            "cached price: {:?}",
+            kilo.cached_input_per_million
+        );
     }
 
     #[test]

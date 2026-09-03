@@ -591,8 +591,9 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(
         Paragraph::new(bubble.muted(format!(
-            " F2 primary · F3 secondary · F4 direction · {}",
-            state.sort.description()
+            " F2 primary · F3 secondary · F4 direction · F5 cache {} · {}",
+            if state.show_cached { "shown" } else { "hidden" },
+            state.sort.description(),
         ))),
         search_row[1],
     );
@@ -603,7 +604,7 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
         hit.price_sort = Some(search_row[1]);
     }
     let mut lines = vec![Line::from(bubble.muted(
-        " Type to filter exact model IDs · F2/F3 choose sort keys · F4 toggles direction · bold green values are cheapest",
+        " Type to filter exact model IDs · F2/F3 choose sort keys · F4 direction · F5 cache · bold green values are cheapest",
     ))];
     match &state.load {
         PricePanelState::Loading => lines.push(Line::from(
@@ -628,7 +629,7 @@ fn draw_prices(f: &mut Frame, app: &App, area: Rect) {
                     matching.len()
                 ))));
                 for comparison in matching.into_iter().skip(first) {
-                    push_price_family(&mut lines, comparison, &bubble);
+                    push_price_family(&mut lines, comparison, &bubble, state.show_cached);
                 }
             }
         }
@@ -640,6 +641,7 @@ fn push_price_family(
     lines: &mut Vec<Line<'static>>,
     comparison: &crate::prices::PriceComparison,
     bubble: &BubbleTheme,
+    show_cached: bool,
 ) {
     let winner = Style::default()
         .fg(bubble.palette.success)
@@ -691,6 +693,12 @@ fn push_price_family(
                 if overall_winner { winner } else { bubble.muted },
             ),
         ];
+        if show_cached && let Some(cached) = price.cached_input_per_million {
+            spans.push(Span::styled(
+                format!(" · ${cached:.4}/M cached"),
+                bubble.muted,
+            ));
+        }
         if comparison.identifiers.len() > 1 {
             spans.push(bubble.muted(format!("  [{}]", price.model_id)));
         }
@@ -1106,24 +1114,31 @@ mod tests {
                     gateway: Gateway::KiloGateway,
                     input_per_million: 1.0,
                     output_per_million: 5.0,
+                    cached_input_per_million: Some(0.03),
                     model_id: "example/model".into(),
                 },
                 PriceRowOwned {
                     gateway: Gateway::VercelAiGateway,
                     input_per_million: 2.0,
                     output_per_million: 4.0,
+                    cached_input_per_million: None,
                     model_id: "example/model".into(),
                 },
             ],
         };
         let bubble = bubble_theme(&Theme::default());
         let mut lines = Vec::new();
-        push_price_family(&mut lines, &comparison, &bubble);
+        push_price_family(&mut lines, &comparison, &bubble, true);
 
         assert!(lines[2].to_string().contains("BEST INPUT"));
+        assert!(lines[2].to_string().contains("$0.0300/M cached"));
         assert!(lines[3].to_string().contains("BEST OUTPUT"));
         assert_eq!(lines[2].spans[1].style.fg, Some(bubble.palette.success));
         assert_eq!(lines[3].spans[2].style.fg, Some(bubble.palette.success));
+
+        let mut hidden_lines = Vec::new();
+        push_price_family(&mut hidden_lines, &comparison, &bubble, false);
+        assert!(!hidden_lines[2].to_string().contains("cached"));
     }
 
     #[test]
@@ -1134,6 +1149,7 @@ mod tests {
             gateway,
             input_per_million: 1.0,
             output_per_million: 1.0,
+            cached_input_per_million: None,
             model_id: "example/model".into(),
         };
         let comparison = PriceComparison {
@@ -1148,7 +1164,7 @@ mod tests {
         };
         let bubble = bubble_theme(&Theme::default());
         let mut lines = Vec::new();
-        push_price_family(&mut lines, &comparison, &bubble);
+        push_price_family(&mut lines, &comparison, &bubble, false);
 
         assert!(lines[2].to_string().contains("BEST OVERALL"));
         assert!(lines[3].to_string().contains("BEST OVERALL"));
@@ -1162,6 +1178,7 @@ mod tests {
             gateway,
             input_per_million: input,
             output_per_million: output,
+            cached_input_per_million: None,
             model_id: "example/model".into(),
         };
         let comparison = PriceComparison {
@@ -1180,7 +1197,7 @@ mod tests {
         };
         let bubble = bubble_theme(&Theme::default());
         let mut lines = Vec::new();
-        push_price_family(&mut lines, &comparison, &bubble);
+        push_price_family(&mut lines, &comparison, &bubble, false);
 
         assert!(lines[2].to_string().contains("BEST OVERALL"));
         assert!(lines[3].to_string().contains("BEST OVERALL"));
