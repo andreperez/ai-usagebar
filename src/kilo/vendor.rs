@@ -36,15 +36,7 @@ pub fn build_placeholders(snap: &KiloSnapshot) -> HashMap<&'static str, String> 
 /// absolute remaining USD balance (mirrors DeepSeek's USD thresholds): running
 /// low = warmer color, empty = critical (the `402` boundary).
 pub fn severity(snap: &KiloSnapshot) -> PaceSeverity {
-    if snap.balance < 1.0 {
-        PaceSeverity::Critical
-    } else if snap.balance < 5.0 {
-        PaceSeverity::High
-    } else if snap.balance < 20.0 {
-        PaceSeverity::Mid
-    } else {
-        PaceSeverity::Low
-    }
+    crate::pango::balance_severity(snap.balance, "USD")
 }
 
 pub fn render(
@@ -144,12 +136,7 @@ fn render_tooltip(
 
 impl From<FetchOutcome> for VendorOutcome {
     fn from(o: FetchOutcome) -> Self {
-        Self {
-            snapshot: crate::usage::VendorSnapshot::Kilo(o.snapshot),
-            stale: o.stale,
-            last_error: o.last_error,
-            cache_age: o.cache_age,
-        }
+        o.map(crate::usage::VendorSnapshot::Kilo)
     }
 }
 

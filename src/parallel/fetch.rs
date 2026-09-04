@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::ParallelSnapshot;
 use crate::vendor::{MAX_BODY_BYTES, read_body_capped};
@@ -33,13 +33,7 @@ impl Default for Endpoints {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: ParallelSnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+pub type FetchOutcome = crate::outcome::Outcome<ParallelSnapshot>;
 
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
@@ -55,12 +49,7 @@ pub async fn fetch_snapshot(
         && cache.payload_age().is_some_and(|age| age < cache_ttl)
         && let Ok(snapshot) = parse_cache(&bytes, &target)
     {
-        return Ok(FetchOutcome {
-            snapshot,
-            stale: false,
-            last_error: cache.read_last_error(),
-            cache_age: cache.payload_age(),
-        });
+        return Ok(crate::outcome::Outcome::cached(snapshot, cache, false));
     }
     match fetch_json::<BalanceResponse>(client, &endpoints.balance, &credential.access_token).await
     {
@@ -73,12 +62,7 @@ pub async fn fetch_snapshot(
                 "will_invoice": snapshot.will_invoice,
             }))?;
             cache.write_payload(&body)?;
-            Ok(FetchOutcome {
-                snapshot,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snapshot))
         }
         Err(error) => fallback(cache, &target, error),
     }
@@ -120,16 +104,7 @@ fn fallback(cache: &Cache, target: &str, error: AppError) -> Result<FetchOutcome
     let pair = error_to_pair(&error);
     cache.mark_stale();
     cache.write_last_error(pair.0, &pair.1);
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(error);
-    };
-    let snapshot = parse_cache(&bytes, target).map_err(|_| error)?;
-    Ok(FetchOutcome {
-        snapshot,
-        stale: true,
-        last_error: Some(pair),
-        cache_age: cache.payload_age(),
-    })
+    crate::outcome::fallback(cache, Some(pair), error, |bytes| parse_cache(bytes, target))
 }
 
 fn error_to_pair(error: &AppError) -> (u16, String) {

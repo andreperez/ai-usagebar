@@ -10,17 +10,18 @@ metrics expand to an empty string unless noted otherwise.
 | Provider | Value | Provider | Value |
 |---|---:|---|---:|
 | Claude | `cld` | Codex | `gpt` |
-| Z.AI | `zai` | OpenRouter | `opr` |
-| DeepSeek | `dsk` | Kimi | `kmi` |
-| Kilo | `klo` | Novita | `nvt` |
-| Moonshot | `msh` | Grok | `grk` |
-| SuperGrok | `sgk` | Anthropic API | `aac` |
-| Antigravity | `agy` | Cursor | `cur` |
-| MiniMax | `mmx` | Kiro CLI | `kir` |
-| Tavily | `tav` | Firecrawl | `fcw` |
+| GitHub Copilot | `ghc` | Z.AI | `zai` |
+| OpenRouter | `opr` | DeepSeek | `dsk` |
+| Kimi | `kmi` | Kilo | `klo` |
+| Novita | `nvt` | Moonshot | `msh` |
+| Grok | `grk` | SuperGrok | `sgk` |
+| Anthropic API | `aac` | Antigravity | `agy` |
+| Cursor | `cur` | MiniMax | `mmx` |
+| Kiro CLI | `kir` | Nous Research | `nrs` |
+| OpenCode Go | `ocg` | Tavily | `tav` |
+| Firecrawl | `fcw` | Parallel | `prl` |
 | Requesty | `rqy` | ZenMux | `zmx` |
-| Vercel AI Gateway | `vag` | | |
-| Nous Research | `nrs` | OpenCode Go | `ocg` |
+| Vercel AI Gateway | `vag` | Command Code | `cmc` |
 
 The same codes ride the `ai-usagebar usage --json` report as each entry's
 `short_name`, so a native frontend can draw a Waybar-style provider tag without
@@ -34,8 +35,10 @@ has one pool, so it maps `kiro_pct` to both percentage slots.
 
 Claude and Codex also provide `*_elapsed`, `*_pace`, and `*_bar` families.
 Z.AI and MiniMax provide elapsed aliases plus provider-specific pace families.
-Antigravity provides elapsed values for all four windows plus
-`{session_model}`, `{weekly_model}`, `{scoped_model}`, and `{extra_model}`.
+Antigravity provides elapsed values plus `{session_model}`, `{weekly_model}`,
+`{scoped_model}`, and `{extra_model}` for whichever of its four windows the
+running product reports — a product that exposes only weekly buckets leaves the
+5-hour placeholders empty rather than reporting a figure it never received.
 Provider-specific families such as `{oai_*}`, `{zai_*}`, and `{or_*}` are empty
 for providers that do not define them.
 
@@ -66,6 +69,20 @@ window is absent, it returns neutral empty, `0`, or `—` values as appropriate.
 
 Session and weekly families are empty when the API omits that window. The
 default widget automatically uses weekly values for a weekly-only response.
+
+## GitHub Copilot
+
+`{copilot_plan}`, `{copilot_reset}`, `{copilot_premium_pct}`,
+`{copilot_premium_used}`, `{copilot_premium_limit}`, `{copilot_chat_pct}`,
+`{copilot_chat_used}`, `{copilot_chat_limit}`, `{copilot_completions_pct}`,
+`{copilot_completions_used}`, `{copilot_completions_limit}`
+
+These represent the `premium_interactions`, `chat`, and `completions` quota
+snapshots that GitHub reports. The default bar format is
+`{copilot_premium_pct}% · {copilot_reset}`. `{session_*}` aliases Premium and
+`{weekly_*}` aliases Chat so one cross-provider format can still render it;
+both use Copilot's account-wide quota reset, not a weekly window. Missing
+quota buckets expand to `—`.
 
 ## Z.AI
 
@@ -120,8 +137,9 @@ currencies are present; otherwise they use CNY.
 
 These cover the subscription quota and rolling five-hour window from
 `api.kimi.com/coding/v1/usages`. The default format is
-`{kimi_weekly_pct}% · {kimi_weekly_reset}`. Generic aliases are `{plan}` for the
-plan, `{weekly_pct}` for weekly usage, and `{session_pct}` for the five-hour
+`5h {kimi_window_pct}% · 7d {kimi_weekly_pct}%`, shortest window first like
+every other two-window vendor. Generic aliases are `{plan}` for the plan,
+`{weekly_pct}` for weekly usage, and `{session_pct}` for the five-hour
 window.
 
 ## Kilo
@@ -153,10 +171,16 @@ USD; the China service uses CNY.
 - `{session_pct}` and `{weekly_pct}` remain aliases for `sgk_pct`.
 - `{plan}` is the subscription tier when Grok Build supplies one.
 
-SuperGrok is the subscription path provided by Grok Build's `x.ai/billing` ACP
-extension. It is separate from the Grok Management API prepaid balance.
-ai-usagebar never parses, copies, caches, refreshes, or sends the SuperGrok
-token in ACP messages. It hashes auth and config files only to keep caches
+SuperGrok is the subscription path. It is separate from the Grok Management
+API prepaid balance. Billing comes from Grok Build's documented
+`cli-chat-proxy.grok.com` endpoint, with the CLI's `x.ai/billing` ACP extension
+as a fallback for builds where that endpoint is unavailable.
+
+The HTTPS path reads the long-lived `key` from the login's `auth.json` and uses
+it inside one outgoing `Authorization` header. ai-usagebar never copies,
+caches, refreshes, logs, or writes that key back, and never echoes it in an
+error; account selection and token rotation stay with Grok Build. The config
+file is read only as opaque bytes for the one-way digest that keeps caches
 separate between logins.
 
 The default executable is `$GROK_HOME/bin/grok`, or `~/.grok/bin/grok` when

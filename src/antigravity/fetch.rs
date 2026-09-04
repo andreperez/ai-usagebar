@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::{AntigravitySnapshot, UsageWindow};
 
@@ -30,22 +30,13 @@ const STATUS_RPC: &str = "exa.language_server_pb.LanguageServerService/GetUserSt
 
 const DEFAULT_PLAN: &str = "Antigravity";
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: AntigravitySnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+/// This vendor's [`Outcome`](crate::outcome::Outcome) — the shared shape,
+/// specialised to its snapshot.
+pub type FetchOutcome = crate::outcome::Outcome<AntigravitySnapshot>;
 
 impl From<FetchOutcome> for crate::vendor::VendorOutcome {
     fn from(o: FetchOutcome) -> Self {
-        Self {
-            snapshot: crate::usage::VendorSnapshot::Antigravity(o.snapshot),
-            stale: o.stale,
-            last_error: o.last_error,
-            cache_age: o.cache_age,
-        }
+        o.map(crate::usage::VendorSnapshot::Antigravity)
     }
 }
 
@@ -85,12 +76,7 @@ pub async fn fetch_snapshot_at(
         Ok(snap) => {
             let bytes = serde_json::to_vec(&snap_to_json(&snap))?;
             cache.write_payload(&bytes)?;
-            Ok(FetchOutcome {
-                snapshot: snap,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snap))
         }
         Err(e) if e.is_transient() => fallback_silent(cache, now, e),
         Err(AppError::Http { status, body }) => {
@@ -306,6 +292,40 @@ pub fn plan_from_status(v: &serde_json::Value) -> String {
 /// Buckets are keyed by `bucketId` (`gemini-5h`, `gemini-weekly`, `3p-5h`,
 /// `3p-weekly`), falling back to the group display name plus the `window`
 /// discriminator so a renamed bucket id still lands in the right slot.
+/// One bucket, named the way the response named it.
+fn describe_bucket(group_name: &str, id: &str, window: Option<&str>) -> String {
+    let id = if id.is_empty() { "<unnamed>" } else { id };
+    let group = if group_name.is_empty() {
+        String::new()
+    } else {
+        format!(" in {group_name:?}")
+    };
+    match window {
+        Some(window) if !window.is_empty() => format!("{id} (window {window}){group}"),
+        _ => format!("{id}{group}"),
+    }
+}
+
+/// A quota summary with nothing we can render. Naming the buckets that *were*
+/// present turns a report of this into something actionable — the alternative
+/// says only what we wanted, which tells neither the user nor a maintainer
+/// whether the plan has no such pool, the product renamed one, or a new
+/// cadence appeared.
+fn no_usable_bucket(seen: &[String]) -> AppError {
+    if seen.is_empty() {
+        return AppError::Other(
+            "antigravity: quota summary has no buckets at all — the running product may \
+             not have a quota for this account yet"
+                .into(),
+        );
+    }
+    AppError::Other(format!(
+        "antigravity: quota summary has no bucket in a window we recognise (5h or \
+         weekly, Gemini or Claude/GPT); it offered: {}",
+        seen.join(", ")
+    ))
+}
+
 pub fn parse_quota_summary(v: &serde_json::Value, plan: String) -> Result<AntigravitySnapshot> {
     let groups = v["response"]["groups"]
         .as_array()
@@ -316,6 +336,10 @@ pub fn parse_quota_summary(v: &serde_json::Value, plan: String) -> Result<Antigr
     let mut gemini_weekly = None;
     let mut tp_5h = None;
     let mut tp_weekly = None;
+    // What the response actually offered, so a summary we cannot use says so
+    // instead of only naming what it wanted. Bucket ids and group names are
+    // quota vocabulary, not account data.
+    let mut seen: Vec<String> = Vec::new();
 
     for group in groups {
         let group_name = group["displayName"].as_str().unwrap_or_default();
@@ -324,6 +348,7 @@ pub fn parse_quota_summary(v: &serde_json::Value, plan: String) -> Result<Antigr
         };
         for bucket in buckets {
             let id = bucket["bucketId"].as_str().unwrap_or_default();
+            seen.push(describe_bucket(group_name, id, bucket["window"].as_str()));
             let window = bucket["window"].as_str().unwrap_or_default();
             let is_weekly = if id.ends_with("weekly") || window == "weekly" {
                 true
@@ -363,19 +388,19 @@ pub fn parse_quota_summary(v: &serde_json::Value, plan: String) -> Result<Antigr
         }
     }
 
-    let session = gemini_5h.ok_or_else(|| {
-        AppError::Other("antigravity: quota summary has no Gemini 5h bucket".into())
-    })?;
-    let weekly = gemini_weekly.ok_or_else(|| {
-        AppError::Other("antigravity: quota summary has no Gemini weekly bucket".into())
-    })?;
+    // Not every product offers every window: Antigravity CLI 1.1.22 returns
+    // weekly buckets only. One recognised window is enough to render — what
+    // must never happen is showing a figure for a window that did not arrive.
+    if gemini_5h.is_none() && gemini_weekly.is_none() && tp_5h.is_none() && tp_weekly.is_none() {
+        return Err(no_usable_bucket(&seen));
+    }
 
     Ok(AntigravitySnapshot {
         plan,
         // Stamped by the caller, which is what knows the session's identity.
         account: String::new(),
-        session,
-        weekly,
+        session: gemini_5h,
+        weekly: gemini_weekly,
         third_party_session: tp_5h,
         third_party_weekly: tp_weekly,
     })
@@ -911,10 +936,9 @@ fn parse_proc_net_line(line: &str) -> Option<(u16, u64)> {
 // ---------------------------------------------------------------------------
 
 fn fallback_silent(cache: &Cache, now: DateTime<Utc>, original: AppError) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(original);
-    };
-    reuse_cache(bytes, cache, true, None, now).or(Err(original))
+    crate::outcome::fallback(cache, None, original, |bytes| {
+        parse_cache_at(bytes, None, now)
+    })
 }
 
 /// Serve the stale cache when there is one. With no cache to fall back on,
@@ -927,14 +951,9 @@ fn fallback_with_error(
     reason: AppError,
     now: DateTime<Utc>,
 ) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(reason);
-    };
-    let Ok(mut outcome) = reuse_cache(bytes, cache, true, None, now) else {
-        return Err(reason);
-    };
-    outcome.last_error = last_error;
-    Ok(outcome)
+    crate::outcome::fallback(cache, last_error, reason, |bytes| {
+        parse_cache_at(bytes, None, now)
+    })
 }
 
 fn reuse_cache(
@@ -945,12 +964,7 @@ fn reuse_cache(
     now: DateTime<Utc>,
 ) -> Result<FetchOutcome> {
     let snap = parse_cache_at(&bytes, account, now)?;
-    Ok(FetchOutcome {
-        snapshot: snap,
-        stale,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
-    })
+    Ok(crate::outcome::Outcome::cached(snap, cache, stale))
 }
 
 /// `account` is the fingerprint of the currently signed-in account, or `None`
@@ -973,8 +987,8 @@ pub fn parse_cache(bytes: &[u8], account: Option<&str>) -> Result<AntigravitySna
 /// five hours after which the session window is guaranteed wrong.
 fn expired_window(snap: &AntigravitySnapshot, now: DateTime<Utc>) -> Option<&'static str> {
     [
-        ("Gemini 5h", Some(&snap.session)),
-        ("Gemini weekly", Some(&snap.weekly)),
+        ("Gemini 5h", snap.session.as_ref()),
+        ("Gemini weekly", snap.weekly.as_ref()),
         ("Claude & GPT OSS 5h", snap.third_party_session.as_ref()),
         ("Claude & GPT OSS weekly", snap.third_party_weekly.as_ref()),
     ]
@@ -1003,9 +1017,17 @@ pub fn parse_cache_at(
     // to 0 would render a confident "0% used" and keep serving it for the rest
     // of the TTL; returning an error makes the caller fall through to a live
     // fetch instead of displaying a fabricated snapshot.
+    // An absent window and a truncated payload look alike unless we insist on
+    // the difference: `snap_to_json` always writes every key, so an explicit
+    // `null` means "this product reported no such window" while a *missing*
+    // key means the document is not one we wrote whole. Only the first is a
+    // snapshot; the second must refetch rather than render a window short.
     let cached_pct = |pct_key: &'static str| -> Result<Option<i32>> {
         match v.get(pct_key) {
-            None | Some(serde_json::Value::Null) => Ok(None),
+            None => Err(AppError::Schema(format!(
+                "antigravity: cached payload is missing {pct_key}"
+            ))),
+            Some(serde_json::Value::Null) => Ok(None),
             Some(value) => value
                 .as_i64()
                 .filter(|pct| (0..=100).contains(pct))
@@ -1016,21 +1038,6 @@ pub fn parse_cache_at(
                     ))
                 }),
         }
-    };
-
-    let window = |pct_key: &'static str, reset_key: &str, weekly: bool| {
-        let pct = cached_pct(pct_key)?.ok_or_else(|| {
-            AppError::Schema(format!("antigravity: cached payload missing {pct_key}"))
-        })?;
-        Ok::<_, AppError>(UsageWindow {
-            utilization_pct: pct,
-            resets_at: parse_reset(&v[reset_key], reset_key)?,
-            window_duration: if weekly {
-                chrono::Duration::days(7)
-            } else {
-                chrono::Duration::hours(5)
-            },
-        })
     };
 
     let optional = |pct_key: &'static str, reset_key: &str, weekly: bool| {
@@ -1051,11 +1058,23 @@ pub fn parse_cache_at(
     let snap = AntigravitySnapshot {
         plan: v["plan"].as_str().unwrap_or(DEFAULT_PLAN).to_string(),
         account: cached_account.unwrap_or_default().to_string(),
-        session: window("session_pct", "session_reset", false)?,
-        weekly: window("weekly_pct", "weekly_reset", true)?,
+        session: optional("session_pct", "session_reset", false)?,
+        weekly: optional("weekly_pct", "weekly_reset", true)?,
         third_party_session: optional("tp_session_pct", "tp_session_reset", false)?,
         third_party_weekly: optional("tp_weekly_pct", "tp_weekly_reset", true)?,
     };
+
+    // A cache with no window left is not a snapshot; refetch rather than draw
+    // an empty panel from it. Mirrors the live parse.
+    if snap.session.is_none()
+        && snap.weekly.is_none()
+        && snap.third_party_session.is_none()
+        && snap.third_party_weekly.is_none()
+    {
+        return Err(AppError::Schema(
+            "antigravity cache holds no usable window; refetching".into(),
+        ));
+    }
 
     if let Some(window) = expired_window(&snap, now) {
         return Err(AppError::Schema(format!(
@@ -1069,10 +1088,10 @@ pub fn snap_to_json(snap: &AntigravitySnapshot) -> serde_json::Value {
     serde_json::json!({
         "plan": snap.plan,
         "account": snap.account,
-        "session_pct": snap.session.utilization_pct,
-        "session_reset": snap.session.resets_at.map(|dt| dt.to_rfc3339()),
-        "weekly_pct": snap.weekly.utilization_pct,
-        "weekly_reset": snap.weekly.resets_at.map(|dt| dt.to_rfc3339()),
+        "session_pct": snap.session.as_ref().map(|w| w.utilization_pct),
+        "session_reset": snap.session.as_ref().and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        "weekly_pct": snap.weekly.as_ref().map(|w| w.utilization_pct),
+        "weekly_reset": snap.weekly.as_ref().and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
         "tp_session_pct": snap.third_party_session.as_ref().map(|w| w.utilization_pct),
         "tp_session_reset": snap.third_party_session.as_ref().and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
         "tp_weekly_pct": snap.third_party_weekly.as_ref().map(|w| w.utilization_pct),
@@ -1132,8 +1151,8 @@ mod tests {
         let snap = parsed();
         assert_eq!(snap.plan, "Google AI Pro");
         // remainingFraction is inverted into "used".
-        assert_eq!(snap.session.utilization_pct, 43);
-        assert_eq!(snap.weekly.utilization_pct, 8);
+        assert_eq!(snap.session.as_ref().unwrap().utilization_pct, 43);
+        assert_eq!(snap.weekly.as_ref().unwrap().utilization_pct, 8);
         assert_eq!(
             snap.third_party_session.as_ref().unwrap().utilization_pct,
             75
@@ -1145,21 +1164,36 @@ mod tests {
     fn each_window_keeps_its_own_reset_time() {
         let snap = parsed();
         let at = |s: &str| Some(DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc));
-        assert_eq!(snap.session.resets_at, at("2026-07-22T17:47:00Z"));
-        assert_eq!(snap.weekly.resets_at, at("2026-07-28T17:39:58Z"));
+        assert_eq!(
+            snap.session.as_ref().unwrap().resets_at,
+            at("2026-07-22T17:47:00Z")
+        );
+        assert_eq!(
+            snap.weekly.as_ref().unwrap().resets_at,
+            at("2026-07-28T17:39:58Z")
+        );
         assert_eq!(
             snap.third_party_weekly.as_ref().unwrap().resets_at,
             at("2026-07-29T12:47:00Z")
         );
         // Regression: weekly must never be a copy of the 5h window.
-        assert_ne!(snap.session.resets_at, snap.weekly.resets_at);
+        assert_ne!(
+            snap.session.as_ref().unwrap().resets_at,
+            snap.weekly.as_ref().unwrap().resets_at
+        );
     }
 
     #[test]
     fn window_durations_match_their_bucket() {
         let snap = parsed();
-        assert_eq!(snap.session.window_duration, chrono::Duration::hours(5));
-        assert_eq!(snap.weekly.window_duration, chrono::Duration::days(7));
+        assert_eq!(
+            snap.session.as_ref().unwrap().window_duration,
+            chrono::Duration::hours(5)
+        );
+        assert_eq!(
+            snap.weekly.as_ref().unwrap().window_duration,
+            chrono::Duration::days(7)
+        );
         assert_eq!(
             snap.third_party_weekly.as_ref().unwrap().window_duration,
             chrono::Duration::days(7)
@@ -1179,8 +1213,8 @@ mod tests {
         )
         .unwrap();
         let snap = parse_quota_summary(&v, "Pro".into()).unwrap();
-        assert_eq!(snap.session.utilization_pct, 50);
-        assert_eq!(snap.weekly.utilization_pct, 10);
+        assert_eq!(snap.session.as_ref().unwrap().utilization_pct, 50);
+        assert_eq!(snap.weekly.as_ref().unwrap().utilization_pct, 10);
         assert_eq!(snap.third_party_session.unwrap().utilization_pct, 100);
         assert!(snap.third_party_weekly.is_none());
     }
@@ -1242,6 +1276,136 @@ mod tests {
             let err = parse_quota_summary(&v, "Pro".into()).unwrap_err();
             assert!(err.to_string().contains("resetTime"), "{err}");
         }
+    }
+
+    /// The cache must round-trip a product that has no 5h window, and must
+    /// still reject a document it did not write whole — an explicit `null`
+    /// means "no such window", a missing key means truncation.
+    #[test]
+    fn a_weekly_only_snapshot_round_trips_through_the_cache() {
+        let mut snap = parsed();
+        snap.session = None;
+        snap.third_party_session = None;
+
+        let bytes = serde_json::to_vec(&snap_to_json(&snap)).unwrap();
+        let back = parse_cache_at(&bytes, None, now()).expect("weekly-only cache is usable");
+
+        assert!(back.session.is_none());
+        assert_eq!(
+            back.weekly.as_ref().unwrap().utilization_pct,
+            snap.weekly.as_ref().unwrap().utilization_pct
+        );
+    }
+
+    /// Issue #139: Antigravity CLI 1.1.22 on a paid account returns weekly
+    /// buckets and no 5-hour ones. Two usable windows arrived, so requiring a
+    /// Gemini 5h bucket threw both away and failed the whole vendor. This is
+    /// the reporter's payload.
+    #[test]
+    fn a_product_reporting_only_weekly_buckets_still_renders_them() {
+        let summary = serde_json::json!({
+            "groups": [
+                {
+                    "displayName": "Gemini Models",
+                    "buckets": [{
+                        "bucketId": "gemini-weekly", "window": "weekly",
+                        "remainingFraction": 0.42,
+                    }],
+                },
+                {
+                    "displayName": "Claude and GPT models",
+                    "buckets": [{
+                        "bucketId": "3p-weekly", "window": "weekly",
+                        "remainingFraction": 0.9,
+                    }],
+                },
+            ],
+        });
+
+        let snap = parse_quota_summary(&summary, "Pro".into()).expect("weekly-only is usable");
+
+        assert!(snap.session.is_none(), "no 5h bucket arrived");
+        assert!(snap.third_party_session.is_none());
+        assert_eq!(snap.weekly.as_ref().unwrap().utilization_pct, 58);
+        assert_eq!(
+            snap.third_party_weekly.as_ref().unwrap().utilization_pct,
+            10
+        );
+    }
+
+    /// The opposite shape must work for the same reason — the fix is "at least
+    /// one window", not "weekly is the required one now".
+    #[test]
+    fn a_product_reporting_only_five_hour_buckets_still_renders_them() {
+        let summary = serde_json::json!({
+            "groups": [{
+                "displayName": "Gemini Models",
+                "buckets": [{
+                    "bucketId": "gemini-5h", "window": "5h", "remainingFraction": 0.25,
+                }],
+            }],
+        });
+
+        let snap = parse_quota_summary(&summary, "Pro".into()).expect("5h-only is usable");
+
+        assert_eq!(snap.session.as_ref().unwrap().utilization_pct, 75);
+        assert!(snap.weekly.is_none());
+    }
+
+    /// Nothing recognisable is still an error, and still names what arrived so
+    /// the next report is diagnosable.
+    #[test]
+    fn a_summary_with_no_recognisable_bucket_errors_and_names_what_it_had() {
+        let summary = serde_json::json!({
+            "groups": [{
+                "displayName": "Gemini Models",
+                "buckets": [{
+                    "bucketId": "gemini-daily", "window": "daily", "remainingFraction": 0.9,
+                }],
+            }],
+        });
+
+        let rendered = parse_quota_summary(&summary, "Pro".into())
+            .expect_err("an unrecognised cadence alone is not a snapshot")
+            .to_string();
+
+        assert!(
+            rendered.contains("no bucket in a window we recognise"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("gemini-daily"), "{rendered}");
+        assert!(rendered.contains("window daily"), "{rendered}");
+    }
+
+    /// A summary with groups but no buckets at all is a different situation
+    /// from a summary whose buckets we did not recognise, and says so.
+    #[test]
+    fn a_summary_with_no_buckets_at_all_says_that_rather_than_listing_nothing() {
+        let summary = serde_json::json!({
+            "groups": [{"displayName": "Gemini", "buckets": []}],
+        });
+
+        let rendered = parse_quota_summary(&summary, "Pro".into())
+            .expect_err("no buckets is an error")
+            .to_string();
+
+        assert!(rendered.contains("no buckets at all"), "{rendered}");
+        assert!(!rendered.contains("it offered:"), "{rendered}");
+    }
+
+    /// An unnamed bucket must still be listed — a summary of nothing but
+    /// unnamed buckets is itself the finding.
+    #[test]
+    fn buckets_without_an_id_are_still_named_in_the_error() {
+        let summary = serde_json::json!({
+            "groups": [{"displayName": "", "buckets": [{"remainingFraction": 0.5}]}],
+        });
+
+        let rendered = parse_quota_summary(&summary, "Pro".into())
+            .expect_err("an unusable summary is an error")
+            .to_string();
+
+        assert!(rendered.contains("<unnamed>"), "{rendered}");
     }
 
     #[test]
@@ -1328,7 +1492,7 @@ mod tests {
     fn expiry_names_the_window_that_rolled_over() {
         let mut snap = parsed();
         // Drop the 5h windows so only the weeklies can expire.
-        snap.session.resets_at = None;
+        snap.session.as_mut().unwrap().resets_at = None;
         snap.third_party_session = None;
         let bytes = serde_json::to_vec(&snap_to_json(&snap)).unwrap();
         let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
@@ -1345,7 +1509,7 @@ mod tests {
     #[test]
     fn a_window_without_a_reset_never_expires() {
         let mut snap = parsed();
-        for w in [&mut snap.session, &mut snap.weekly] {
+        for w in [&mut snap.session, &mut snap.weekly].into_iter().flatten() {
             w.resets_at = None;
         }
         snap.third_party_session = None;

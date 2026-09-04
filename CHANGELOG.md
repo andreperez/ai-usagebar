@@ -41,27 +41,170 @@ Each release is also published at
 - Vercel AI Gateway credits, lifetime spend, and optional month-to-date Custom
   Reporting totals with an independently cached, opt-in reporting query.
 
-- The Omarchy Quattro plugin can show which provider the bar entry is about.
-  **Show provider name in the top bar** — a new opt-in toggle beside the
-  existing usage-value one, or `omarchy bar set akitaonrails.ai-usagebar
-  showProvider true --json` — prefixes the label with the provider's
-  three-letter code, the same one Waybar's `{vendor_short}` prints, so the
-  entry reads `cld 29%` or `gpt 95%` after the icon. It matters most on a bar
-  that cycles several providers, where the percentage alone never said whose
-  it was. Off by default, so an existing bar entry keeps the label it has
-  today; with the usage value turned off the entry keeps the icon and the
-  code alone, and a vertical bar still shows the icon alone.
-- `ai-usagebar usage --json` reports each entry's `short_name`. It is the field
-  the toggle above draws, and it is additive like the rest of the report.
+## [1.10.0] — 2026-09-02
+
+### Added
+
+- **GitHub Copilot** is supported as a vendor, selectable with
+  `--vendor copilot` and enabled with `[copilot]` in config. It shows the
+  premium-request, Chat and Completions quotas with their reset, from the
+  `api.github.com/copilot_internal/user` endpoint the VS Code extension uses.
+  There is no key to paste: the OAuth token comes from `gh auth token`, so an
+  existing `gh auth login` is the whole setup, and `GITHUB_COPILOT_TOKEN`
+  overrides it. `gh` is looked up on `PATH` — it has no canonical install
+  location — so `[copilot] gh_binary` pins the executable when that matters.
+  The token is only ever read: it is used in one outgoing `Authorization`
+  header and never copied, cached, logged, or echoed in an error.
+
+### Fixed
+
+- Kimi leads with its rolling 5h window and carries the weekly quota under it,
+  the order every other two-window vendor uses — Claude's `Session (5h)` above
+  `Weekly (7d)`, Codex's `Codex 5h` above `Codex weekly`, GLM's `Session (5h)`
+  above `Weekly`. It was the one provider drawing the long window first, so a
+  glance across vendors compared different rows. The Waybar tooltip and the
+  shared panel projection both move, which carries the Omarchy Quattro panel,
+  the KDE plasmoid, the TUI detail panel, the TUI Overview row (`5h` before
+  `wk`) and `usage --json` with them. Kimi's Waybar bar text, the macOS menu
+  bar and the GNOME dropdown already read the 5h window off the `session_*`
+  alias and are unchanged.
+
+- Kimi's quota rows drop their `55 / 100 · 45 left` counters and show the
+  plain `Resets in 3d 20h` every other window row shows. Kimi was the only
+  vendor spelling a ratio out beside the bar that already draws it, and the
+  raw figures stay available through the `{kimi_*_used}`, `{kimi_*_limit}`
+  and `{kimi_*_remaining}` placeholders for anyone who wants them in a
+  custom format — the bar and its `55%` directly above already said it, three
+  times over. Kimi's rows now go through the shared `push_window` instead of
+  a hand-rolled near-copy of it, so the panel and the Waybar tooltip cannot
+  drift apart again. The tooltip is 16 columns narrower for it. The shared
+  `WindowRow::with_detail` hook the old rows used goes with them — Kimi was
+  its only caller.
+
+- A credential typed into the Omarchy settings panel is now scrubbed from the
+  panel's memory even when the save *fails*. It was only cleared on the success
+  path, so a failed save left the pasted value in a long-lived QML shell. This
+  affects every key-authenticated vendor, not just the new one.
+
+- Antigravity renders whatever windows the running product reports instead of
+  failing when a 5-hour bucket is absent (#139). Antigravity CLI 1.1.22 returns
+  weekly buckets only, so requiring a Gemini 5h window threw away two perfectly
+  good ones and failed the whole vendor with "quota summary has no Gemini 5h
+  bucket". All four windows are optional now — as Z.AI's already were — and a
+  snapshot needs one recognised bucket rather than two specific ones. A cadence
+  with nothing under it no longer draws an empty heading, and the placeholders
+  for a window that did not arrive are empty rather than claiming a figure.
+  Rejecting a summary with nothing recognisable in it is unchanged, and it
+  still names the buckets it did receive. `docs/vendor-endpoints.md` gains the
+  Antigravity row it never had — it was the only provider missing from that
+  table — and the placeholder reference no longer promises all four windows.
+
+## [1.9.1] — 2026-08-30
+
+### Fixed
+
+- Antigravity's "quota summary has no Gemini 5h bucket" error now names the
+  buckets the summary *did* contain, with their windows and groups (#139). The
+  old message said only what was wanted, so a plan with no such pool, a renamed
+  bucket, and a new cadence were indistinguishable from each other — to the user
+  and to a maintainer reading the report. A summary carrying no buckets at all
+  says that instead of listing nothing. The parser is unchanged and still
+  refuses to invent a window it cannot find.
+
+- Named Codex accounts (`[[openai.accounts]]`, added in 1.8.0) are now actually
+  reachable: `--vendor openai --account <label>` was rejected by CLI validation
+  before it could dispatch, `~` in an account's `codex_auth_path` was never
+  expanded, and the TUI and `usage` report skipped openai named accounts
+  entirely. All three paths now mirror the OpenRouter account handling — one
+  tab/report entry per named account, each with its own isolated cache — and
+  openai account labels are validated and de-duplicated on config load like the
+  other multi-account vendors.
+- SuperGrok works again with grok CLI 1.0.13, which dropped the `x.ai/billing`
+  ACP extension the vendor was built on (`-32601 Method not found`, probed
+  directly, after a session handshake, and in leader mode). The vendor now
+  calls the CLI's documented `cli-chat-proxy.grok.com/v1/billing` endpoint
+  first, using the long-lived `key` already stored in the login's `auth.json`
+  — read-only, size-bounded, used only inside one outgoing `Authorization`
+  header, never copied, cached, logged, or echoed in an error — and falls back
+  to the ACP process for CLI builds where the endpoint is unavailable. When
+  both transports fail, the direct error is reported because it reflects the
+  actual login state. Response parsing is unchanged: the proxy returns the
+  same camelCase `BillingConfig` shape the strict wire types already accept.
+  The endpoint is fixed: `GROK_CLI_CHAT_PROXY_BASE_URL` still scopes the
+  cache (it changes which login is in play) but does not choose where the
+  key is sent. The README frontend table, `docs/configuration.md`,
+  `docs/vendor-endpoints.md` and `docs/format-placeholders.md` are updated to
+  match: they described SuperGrok as ACP-only and stated that the login files
+  were never parsed, which stopped being true with this change.
 
 ### Changed
 
-- `{vendor_short}` is now `VendorId::short_name` for every provider instead of
-  a literal repeated in eighteen renderers, so the report, the placeholder and
-  the native panels cannot drift apart. The codes themselves are unchanged, and
-  a test now rejects a duplicate or a non-three-letter one.
-- The `{vendor_short}` reference table lists Nous Research (`nrs`) and OpenCode
-  Go (`ocg`), which both shipped codes without ever being written down.
+- Internal: `account.rs` grew from 7 tests to 22 by splitting its decisions
+  from its prompting and printing (#137) — the deletion-conflict authorization,
+  the keep-list parser, and the status and switch-plan renderers are now pure
+  functions with coverage. No behaviour changes; the extracted code is the code
+  that was there. Regions covered went 22% → 50%, whole-tree 83.9% → 85.1%.
+- Internal: the four-field record every vendor fetch returns, and the policy
+  around it, is now `outcome::Outcome<T>` instead of eighteen private copies
+  (#136). No behaviour changes — the copies had already been reconciled in
+  1.9.0 — but the reconciliation is now structural rather than repeated, and a
+  guard test forbids a second reader of the stale payload. Net −508 lines.
+
+## [1.9.0] — 2026-08-28
+
+### Added
+
+- **Command Code** (`commandcode.ai`) is supported as a vendor, selectable with
+  `--vendor commandcode` and enabled with `[commandcode]` in config. It shows
+  the 5-hour and weekly rolling spend windows — priced in dollars, as Command
+  Code meters spend rather than tokens — plus the plan and the monthly credit
+  remaining. Like Cursor and Kiro CLI it needs no key of its own: it reuses the
+  OAuth credential from either the official CLI or pi
+  (`~/.commandcode/auth.json`, then `~/.pi/agent/auth.json`), with
+  `COMMANDCODE_API_KEY` as an override. The credential is only ever read —
+  refreshing it belongs to the CLI that owns the file — so an expired token is
+  reported as expired rather than silently rewritten.
+
+### Changed
+
+- EUR, GBP, BRL and JPY amounts render with their symbol everywhere. The two
+  money formatters — one for decimal amounts, one for integer minor units —
+  each carried their own currency table, and they disagreed: the same euro
+  figure read `3.50 EUR` in one panel and `€3.50` in another. Both now share a
+  single table. USD and CNY are unchanged, and a currency with no symbol still
+  trails its code rather than guessing one.
+
+### Fixed
+
+- A vendor whose cache is cold now reports **what actually failed** instead of
+  a generic "no usable cache". Claude, Codex, Z.AI, OpenRouter and DeepSeek
+  replaced the original error with that message when there was no cached
+  figure to fall back on, so on a first run an expired key, a `500` and a
+  genuinely empty cache all rendered identically — the useful diagnostic was
+  written to disk and shown only on the *next* refresh. The other thirteen
+  vendors already returned the original error; a guard test keeps the two
+  groups from diverging again.
+- Z.AI's rows in the native panels — Omarchy Quattro, GNOME, KDE and the TUI —
+  carry the pace footnote every other percentage vendor's rows carry
+  (`60% elapsed · 20pts under`) instead of a bare `Resets in 2h 00m`. GLM's
+  session, weekly and monthly MCP windows each report a duration and a reset,
+  so all three pace, off the same `pacing::calc` the `{zai_*_pace}`
+  placeholders already use. Each surface keeps its own way of showing it, so
+  nothing else moves: the arrow stays the widget's, the bar tick the macOS
+  menu bar's, the footnote the panels'.
+
+## [1.8.0] — 2026-08-28
+
+### Added
+
+- Multiple OpenAI (Codex) logins, via `[[openai.accounts]]` (#134). Each entry
+  is a label plus its own `codex_auth_path`, the same shape
+  `[[anthropic.accounts]]` uses and for the same reason: Codex is an OAuth
+  vendor, so an account is a credential file and refreshes write back into
+  whichever one they came from. Named accounts are selected with
+  `--account <label>` and cached separately under
+  `~/.cache/ai-usagebar/openai/<label>`, so two subscriptions can never serve
+  each other's usage. A config without the array behaves exactly as before.
 
 ## [1.7.0] — 2026-08-25
 
@@ -1760,7 +1903,11 @@ vendors. Highlights:
 - Live API smoke test suite (`make smoke`) that exercises the real
   undocumented endpoints to detect schema drift before users do.
 
-[Unreleased]: https://github.com/akitaonrails/ai-usagebar/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/akitaonrails/ai-usagebar/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.9.1...v1.10.0
+[1.9.1]: https://github.com/akitaonrails/ai-usagebar/compare/v1.9.0...v1.9.1
+[1.9.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/akitaonrails/ai-usagebar/compare/v1.5.2...v1.6.0
 [1.5.2]: https://github.com/akitaonrails/ai-usagebar/compare/v1.5.1...v1.5.2

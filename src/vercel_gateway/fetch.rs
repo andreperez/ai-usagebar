@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, TimeZone, Utc};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use crate::cache::{Cache, DetailCache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, DetailCache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::{VercelGatewaySnapshot, VercelReport, finite_amount};
 use crate::vendor::{MAX_BODY_BYTES, read_body_capped};
@@ -32,13 +32,8 @@ impl Default for Endpoints {
         }
     }
 }
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: VercelGatewaySnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+pub type FetchOutcome = crate::outcome::Outcome<VercelGatewaySnapshot>;
+type CreditsOutcome = FetchOutcome;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_snapshot(
@@ -63,8 +58,7 @@ pub async fn fetch_snapshot(
         cache_ttl,
     )
     .await?;
-    let mut snapshot = credits.snapshot;
-    let mut last_error = credits.last_error;
+    let mut outcome = credits;
     if report_enabled {
         let detail = cache.detail("usage_report");
         match fetch_report_cached(
@@ -78,24 +72,14 @@ pub async fn fetch_snapshot(
         )
         .await
         {
-            Ok(report) => snapshot.report = Some(report),
-            Err(error) if last_error.is_none() => last_error = Some(error_to_pair(&error)),
+            Ok(report) => outcome.snapshot.report = Some(report),
+            Err(error) if outcome.last_error.is_none() => {
+                outcome.last_error = Some(error_to_pair(&error));
+            }
             Err(_) => {}
         }
     }
-    Ok(FetchOutcome {
-        snapshot,
-        stale: credits.stale,
-        last_error,
-        cache_age: credits.cache_age,
-    })
-}
-
-struct CreditsOutcome {
-    snapshot: VercelGatewaySnapshot,
-    stale: bool,
-    last_error: Option<(u16, String)>,
-    cache_age: Option<Duration>,
+    Ok(outcome)
 }
 
 async fn fetch_credits_cached(
@@ -111,12 +95,7 @@ async fn fetch_credits_cached(
         && cache.payload_age().is_some_and(|age| age < ttl)
         && let Ok(snapshot) = parse_credits_cache(&bytes, target)
     {
-        return Ok(CreditsOutcome {
-            snapshot,
-            stale: false,
-            last_error: cache.read_last_error(),
-            cache_age: cache.payload_age(),
-        });
+        return Ok(crate::outcome::Outcome::cached(snapshot, cache, false));
     }
     match fetch_json::<CreditsResponse>(client, url, api_key, &[], false).await {
         Ok(response) => {
@@ -125,12 +104,7 @@ async fn fetch_credits_cached(
                 &serde_json::json!({"target":target,"balance":snapshot.balance,"total_used":snapshot.total_used}),
             )?;
             cache.write_payload(&body)?;
-            Ok(CreditsOutcome {
-                snapshot,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snapshot))
         }
         Err(error) => fallback_credits(cache, target, error),
     }
@@ -200,15 +174,8 @@ fn fallback_credits(cache: &Cache, target: &str, error: AppError) -> Result<Cred
     let pair = error_to_pair(&error);
     cache.mark_stale();
     cache.write_last_error(pair.0, &pair.1);
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(error);
-    };
-    let snapshot = parse_credits_cache(&bytes, target).map_err(|_| error)?;
-    Ok(CreditsOutcome {
-        snapshot,
-        stale: true,
-        last_error: Some(pair),
-        cache_age: cache.payload_age(),
+    crate::outcome::fallback(cache, Some(pair), error, |bytes| {
+        parse_credits_cache(bytes, target)
     })
 }
 

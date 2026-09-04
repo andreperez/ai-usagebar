@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AUTH_FAILURE_MESSAGE, AppError, Result};
 use crate::vendor::{MAX_BODY_BYTES, read_body_capped};
 
@@ -28,13 +28,9 @@ impl Default for Endpoints {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: Usage,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+/// This vendor's [`Outcome`](crate::outcome::Outcome) — the shared shape,
+/// specialised to its snapshot.
+pub type FetchOutcome = crate::outcome::Outcome<Usage>;
 
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
@@ -50,12 +46,7 @@ pub async fn fetch_snapshot(
     if let Some(bytes) = cache.fresh_payload(ttl)?
         && let Ok(snapshot) = parse_cache(&bytes, &target)
     {
-        return Ok(FetchOutcome {
-            snapshot,
-            stale: false,
-            last_error: cache.read_last_error(),
-            cache_age: cache.payload_age(),
-        });
+        return Ok(crate::outcome::Outcome::cached(snapshot, cache, false));
     }
 
     match fetch_live(client, &endpoints.usage, api_key).await {
@@ -65,12 +56,7 @@ pub async fn fetch_snapshot(
                 "response": usage_repr(&snapshot),
             }))?;
             cache.write_payload(&body)?;
-            Ok(FetchOutcome {
-                snapshot,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snapshot))
         }
         Err(error @ AppError::Transport(_)) => fallback_or_error(cache, None, &target, error),
         Err(AppError::Http { status, .. }) => {
@@ -181,29 +167,7 @@ fn fallback_or_error(
     target: &str,
     error: AppError,
 ) -> Result<FetchOutcome> {
-    if let Some(snapshot) = cached_outcome(cache, last_error, target)? {
-        return Ok(snapshot);
-    }
-    Err(error)
-}
-
-fn cached_outcome(
-    cache: &Cache,
-    last_error: Option<(u16, String)>,
-    target: &str,
-) -> Result<Option<FetchOutcome>> {
-    let Some(body) = cache.fallback_payload(MAX_STALE)? else {
-        return Ok(None);
-    };
-    let Ok(snapshot) = parse_cache(&body, target) else {
-        return Ok(None);
-    };
-    Ok(Some(FetchOutcome {
-        snapshot,
-        stale: true,
-        last_error: last_error.or_else(|| cache.read_last_error()),
-        cache_age: cache.payload_age(),
-    }))
+    crate::outcome::fallback(cache, last_error, error, |body| parse_cache(body, target))
 }
 
 fn parse_cache(body: &[u8], target: &str) -> Result<Usage> {

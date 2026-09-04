@@ -140,6 +140,12 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
             }
             (s.plan.clone(), cells)
         }
+        VendorSnapshot::Copilot(s) => (
+            s.plan.clone(),
+            s.quotas()
+                .map(|(label, quota)| pct(label, quota.used_pct()))
+                .collect(),
+        ),
         VendorSnapshot::Zai(s) => {
             let mut cells = Vec::new();
             if let Some(w) = &s.session {
@@ -157,7 +163,7 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
         VendorSnapshot::Deepseek(s) => (String::new(), vec![money_cell(s.balance, &s.currency)]),
         VendorSnapshot::Kimi(s) => (
             s.plan.clone().unwrap_or_default(),
-            vec![pct("wk", s.weekly_pct()), pct("5h", s.window_pct())],
+            vec![pct("5h", s.window_pct()), pct("wk", s.weekly_pct())],
         ),
         VendorSnapshot::Kilo(s) => (String::new(), vec![usd_cell(s.balance)]),
         VendorSnapshot::Novita(s) => (String::new(), vec![usd_cell(s.available)]),
@@ -166,10 +172,13 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
         VendorSnapshot::SuperGrok(s) => (s.plan.clone(), vec![pct(s.period.short(), s.weekly_pct)]),
         VendorSnapshot::Antigravity(s) => (
             s.plan.clone(),
-            vec![
-                pct("S", s.session.utilization_pct),
-                pct("W", s.weekly.utilization_pct),
-            ],
+            [
+                s.session.as_ref().map(|w| pct("S", w.utilization_pct)),
+                s.weekly.as_ref().map(|w| pct("W", w.utilization_pct)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         ),
         VendorSnapshot::Cursor(s) => (
             s.plan.clone(),
@@ -189,6 +198,16 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
                 .map(|value| pct("usage", value.round().clamp(0.0, 100.0) as i32))
                 .unwrap_or_else(|| ("—".into(), PaceSeverity::Low));
             (s.plan.clone().unwrap_or_default(), vec![cell])
+        }
+        VendorSnapshot::CommandCode(s) => {
+            let cells = [
+                ("session", s.five_hour.as_ref()),
+                ("weekly", s.weekly.as_ref()),
+            ]
+            .into_iter()
+            .filter_map(|(label, window)| window.map(|window| pct(label, window.pct())))
+            .collect();
+            (s.plan.clone().unwrap_or_default(), cells)
         }
         VendorSnapshot::OpenCodeGo(s) => {
             let cells = [
@@ -287,6 +306,7 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         .into_iter()
         .flatten()
         .max(),
+        VendorSnapshot::Copilot(s) => s.quotas().map(|(_, quota)| quota.used_pct()).max(),
         VendorSnapshot::Zai(s) => [
             s.session.as_ref().map(|w| w.utilization_pct),
             s.weekly.as_ref().map(|w| w.utilization_pct),
@@ -295,15 +315,25 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         .flatten()
         .max(),
         VendorSnapshot::Kimi(s) => Some(s.weekly_pct().max(s.window_pct())),
-        VendorSnapshot::Antigravity(s) => {
-            Some(s.session.utilization_pct.max(s.weekly.utilization_pct))
-        }
+        VendorSnapshot::Antigravity(s) => [
+            s.session.as_ref().map(|w| w.utilization_pct),
+            s.weekly.as_ref().map(|w| w.utilization_pct),
+            s.third_party_session.as_ref().map(|w| w.utilization_pct),
+            s.third_party_weekly.as_ref().map(|w| w.utilization_pct),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
         VendorSnapshot::Cursor(s) => (!s.unlimited).then_some(s.total_pct),
         VendorSnapshot::Minimax(s) => Some(s.session.utilization_pct.max(s.weekly.utilization_pct)),
         VendorSnapshot::Kiro(s) => Some(s.pct()),
         VendorSnapshot::NousResearch(s) => s
             .usage_percent()
             .map(|value| value.round().clamp(0.0, 100.0) as i32),
+        VendorSnapshot::CommandCode(s) => {
+            let worst = s.worst_pct();
+            (s.five_hour.is_some() || s.weekly.is_some()).then_some(worst)
+        }
         VendorSnapshot::OpenCodeGo(s) => [
             s.rolling
                 .as_ref()
@@ -412,7 +442,8 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::Anthropic(s) => anthropic_sections(s, now, pace_tolerance),
                 VendorSnapshot::AnthropicApi(s) => anthropic_api_sections(s),
                 VendorSnapshot::Openai(s) => openai_sections(s, now, pace_tolerance),
-                VendorSnapshot::Zai(s) => zai_sections(s, now),
+                VendorSnapshot::Copilot(s) => copilot_sections(s, now),
+                VendorSnapshot::Zai(s) => zai_sections(s, now, pace_tolerance),
                 VendorSnapshot::Openrouter(s) => openrouter_sections(s),
                 VendorSnapshot::Deepseek(s) => deepseek_sections(s),
                 VendorSnapshot::Kimi(s) => kimi_sections(s, now, pace_tolerance),
@@ -433,6 +464,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::Requesty(s) => requesty_sections(s),
                 VendorSnapshot::ZenMux(s) => zenmux_sections(s, now),
                 VendorSnapshot::VercelGateway(s) => vercel_gateway_sections(s),
+                VendorSnapshot::CommandCode(s) => commandcode_sections(s, now),
             };
             // Inject the (already-absolute) fetched-at instant into the title
             // row, right-aligned. Pre-snapshotted in app::refresh_one so it
@@ -712,19 +744,58 @@ fn openai_sections(
     v
 }
 
-fn zai_sections(s: &crate::usage::ZaiSnapshot, now: DateTime<Utc>) -> SectionBuilder {
+fn copilot_sections(s: &crate::copilot::types::Snapshot, now: DateTime<Utc>) -> SectionBuilder {
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: format!("GitHub Copilot {}", s.plan),
+        right: None,
+    }]);
+    for (label, quota) in s.quotas() {
+        let pct = quota.used_pct();
+        let detail = if quota.unlimited {
+            "Unlimited".to_string()
+        } else {
+            quota
+                .used_and_entitlement()
+                .map(|(used, entitlement)| format!("{used} of {entitlement} used"))
+                .unwrap_or_else(|| format!("{}% remaining", quota.percent_remaining))
+        };
+        sections.push(Section::Spacer);
+        sections.push_metric(
+            Section::Metric {
+                label: label.to_string(),
+                pct: pct.clamp(0, 100) as u16,
+                severity: severity_for(pct),
+                value_label: if quota.unlimited {
+                    "Unlimited".to_string()
+                } else {
+                    format!("{pct}%")
+                },
+                footnote: detail,
+            },
+            s.reset_at,
+        );
+    }
+    sections.push(Section::Spacer);
+    sections.push(Section::Text {
+        label: "Resets".into(),
+        value: countdown::format(s.reset_at, now),
+    });
+    sections
+}
+
+fn zai_sections(s: &crate::usage::ZaiSnapshot, now: DateTime<Utc>, tol: u32) -> SectionBuilder {
     let mut v = SectionBuilder::new(vec![Section::Title {
         left: s.plan.clone(),
         right: None,
     }]);
     if let Some(w) = &s.session {
-        push_window(&mut v, "Session (5h)", w, now, 5, false);
+        push_window(&mut v, "Session (5h)", w, now, tol, true);
     }
     if let Some(w) = &s.weekly {
-        push_window(&mut v, "Weekly", w, now, 5, false);
+        push_window(&mut v, "Weekly", w, now, tol, true);
     }
     if let Some(w) = &s.mcp {
-        push_window(&mut v, "MCP tools (monthly)", w, now, 5, false);
+        push_window(&mut v, "MCP tools (monthly)", w, now, tol, true);
     }
     if s.session.is_none() && s.weekly.is_none() && s.mcp.is_none() {
         v.push(Section::Spacer);
@@ -806,15 +877,26 @@ fn antigravity_sections(
         right: None,
     }]);
     for (heading, primary, third_party) in [
-        ("Session", &s.session, s.third_party_session.as_ref()),
-        ("Weekly", &s.weekly, s.third_party_weekly.as_ref()),
+        (
+            "Session",
+            s.session.as_ref(),
+            s.third_party_session.as_ref(),
+        ),
+        ("Weekly", s.weekly.as_ref(), s.third_party_weekly.as_ref()),
     ] {
+        // A cadence no bucket reported gets no heading either — an empty
+        // "Session" with nothing under it reads as a failed fetch.
+        if primary.is_none() && third_party.is_none() {
+            continue;
+        }
         v.push(Section::Spacer);
         v.push(Section::Text {
             label: heading.into(),
             value: String::new(),
         });
-        push_window(&mut v, GROUP_PRIMARY, primary, now, 5, false);
+        if let Some(w) = primary {
+            push_window(&mut v, GROUP_PRIMARY, w, now, 5, false);
+        }
         if let Some(w) = third_party {
             push_window(&mut v, GROUP_THIRD_PARTY, w, now, 5, false);
         }
@@ -910,6 +992,58 @@ fn nous_sections(s: &crate::nous::types::AccountSnapshot, now: DateTime<Utc>) ->
         sections.push(Section::Text {
             label: "Renews".into(),
             value: countdown::format(Some(period_end), now),
+        });
+    }
+    sections
+}
+
+fn commandcode_sections(
+    s: &crate::commandcode::types::Snapshot,
+    now: DateTime<Utc>,
+) -> SectionBuilder {
+    let title = match s.plan.as_deref() {
+        Some(plan) if !plan.is_empty() => format!("Command Code {plan}"),
+        _ => "Command Code".to_string(),
+    };
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: title,
+        right: None,
+    }]);
+    for (label, window) in [
+        ("Session (5h)", s.five_hour.as_ref()),
+        ("Weekly", s.weekly.as_ref()),
+    ] {
+        if let Some(window) = window {
+            let pct = window.pct();
+            sections.push_metric(
+                Section::Metric {
+                    label: label.into(),
+                    pct: pct.clamp(0, 100) as u16,
+                    severity: severity_for(pct),
+                    value_label: format!("{pct}%"),
+                    footnote: format!("{} of {}", usd(window.used), usd(window.cap)),
+                },
+                window.resets_at,
+            );
+            sections.push(Section::Text {
+                label: "Resets".into(),
+                value: countdown::format(window.resets_at, now),
+            });
+        }
+    }
+    if let Some(credits) = s.credits.as_ref() {
+        sections.push(Section::Spacer);
+        let footnote = match (s.credits_spent(), s.credit_pool) {
+            (Some(spent), Some(pool)) => format!("{} of {} spent", usd(spent), usd(pool)),
+            _ => String::new(),
+        };
+        sections.push(Section::Text {
+            label: "Credits".into(),
+            value: if footnote.is_empty() {
+                usd(credits.remaining())
+            } else {
+                format!("{} · {footnote}", usd(credits.remaining()))
+            },
         });
     }
     sections
@@ -1156,48 +1290,30 @@ fn deepseek_sections(s: &crate::usage::DeepseekSnapshot) -> SectionBuilder {
     v
 }
 
-fn kimi_sections(s: &crate::usage::KimiSnapshot, now: DateTime<Utc>, _tol: u32) -> SectionBuilder {
+/// Kimi reports each quota as used/limit against a limit of 100, so the pair
+/// is the percentage in longhand. Projecting both onto a `UsageWindow` lets
+/// the shared `push_window` draw them, which is what keeps the row identical
+/// to every other vendor's instead of a hand-rolled near-copy.
+fn kimi_sections(s: &crate::usage::KimiSnapshot, now: DateTime<Utc>, tol: u32) -> SectionBuilder {
+    use crate::kimi::vendor::{ROLLING_WINDOW, WEEKLY_WINDOW};
+
     let plan = s.plan.as_deref().unwrap_or("Kimi");
     let mut v = SectionBuilder::new(vec![Section::Title {
         left: plan.into(),
         right: None,
     }]);
-
-    let weekly_pct = s.weekly_pct().clamp(0, 100) as u16;
-    v.push(Section::Spacer);
-    v.push_metric(
-        Section::Metric {
-            label: "Weekly quota".into(),
-            pct: weekly_pct,
-            severity: severity_for(s.weekly_pct()),
-            value_label: format!("{} / {}", s.weekly_used, s.weekly_limit),
-            footnote: format!(
-                "{} remaining · reset {}",
-                s.weekly_remaining,
-                countdown::format(s.weekly_reset_at, now)
-            ),
-        },
-        s.weekly_reset_at,
-    );
+    let window = |pct, resets_at, window_duration| crate::usage::UsageWindow {
+        utilization_pct: pct,
+        resets_at,
+        window_duration,
+    };
 
     if s.window_limit > 0 {
-        let window_pct = s.window_pct().clamp(0, 100) as u16;
-        v.push(Section::Spacer);
-        v.push_metric(
-            Section::Metric {
-                label: "Rolling window (5h)".into(),
-                pct: window_pct,
-                severity: severity_for(s.window_pct()),
-                value_label: format!("{} / {}", s.window_used, s.window_limit),
-                footnote: format!(
-                    "{} remaining · reset {}",
-                    s.window_remaining,
-                    countdown::format(s.window_reset_at, now)
-                ),
-            },
-            s.window_reset_at,
-        );
+        let w = window(s.window_pct(), s.window_reset_at, ROLLING_WINDOW);
+        push_window(&mut v, "Rolling window (5h)", &w, now, tol, false);
     }
+    let w = window(s.weekly_pct(), s.weekly_reset_at, WEEKLY_WINDOW);
+    push_window(&mut v, "Weekly quota", &w, now, tol, false);
 
     v
 }
@@ -1751,6 +1867,41 @@ mod tests {
     }
 
     #[test]
+    fn copilot_sections_carry_quota_reset_metadata() {
+        let reset_at = now() + chrono::Duration::days(4);
+        let snapshot = VendorSnapshot::Copilot(crate::copilot::types::Snapshot {
+            plan: "Pro".into(),
+            premium: Some(crate::copilot::types::Quota {
+                percent_remaining: 25,
+                entitlement: Some(300),
+                remaining: Some(75),
+                unlimited: false,
+            }),
+            chat: None,
+            completions: None,
+            reset_at: Some(reset_at),
+        });
+        let sections = sections_with_metadata_for(&ready(snapshot), now(), 5);
+        assert!(matches!(
+            &sections[0].section,
+            Section::Title { left, .. } if left == "GitHub Copilot Pro"
+        ));
+        let metric = sections
+            .iter()
+            .find(|projection| matches!(&projection.section, Section::Metric { .. }))
+            .expect("premium metric");
+        assert_eq!(metric.reset_at, Some(reset_at));
+        assert!(matches!(
+            &metric.section,
+            Section::Metric { label, pct, value_label, footnote, .. }
+                if label == "Premium requests"
+                    && *pct == 75
+                    && value_label == "75%"
+                    && footnote == "225 of 300 used"
+        ));
+    }
+
+    #[test]
     fn anthropic_sections_include_all_three_windows_when_present() {
         let snap = AnthropicSnapshot {
             plan: "Max 20x".into(),
@@ -1934,6 +2085,42 @@ mod tests {
         assert_eq!(cells[0].0, "-$5.71");
     }
 
+    /// The panels express pace as a footnote on the row; the arrow is the
+    /// widget's idiom and the bar tick the menu bar's. All three Z.AI windows
+    /// report a duration and a reset, so all three carry one.
+    #[test]
+    fn zai_windows_are_paced_like_every_other_percentage_vendor() {
+        let window = |pct: i32, hours: i64, span: chrono::Duration| crate::usage::UsageWindow {
+            utilization_pct: pct,
+            resets_at: Some(now() + chrono::Duration::hours(hours)),
+            window_duration: span,
+        };
+        let snap = ZaiSnapshot {
+            plan: "GLM Coding Pro".into(),
+            session: Some(window(40, 2, chrono::Duration::hours(5))),
+            weekly: Some(window(60, 48, chrono::Duration::days(7))),
+            mcp: Some(window(10, 200, chrono::Duration::days(30))),
+        };
+
+        let footnotes: Vec<String> = sections_for(&ready(VendorSnapshot::Zai(snap)), now(), 5)
+            .into_iter()
+            .filter_map(|section| match section {
+                Section::Metric { footnote, .. } => Some(footnote),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(footnotes.len(), 3, "{footnotes:?}");
+        for footnote in &footnotes {
+            assert!(footnote.contains("% elapsed"), "{footnote}");
+        }
+        // 40% used with 60% of a 5h window gone: behind pace, not ahead.
+        assert_eq!(
+            footnotes[0], "Resets in 2h 00m · 60% elapsed · 20pts under",
+            "{footnotes:?}"
+        );
+    }
+
     #[test]
     fn zai_no_windows_renders_message() {
         let snap = ZaiSnapshot {
@@ -2091,23 +2278,51 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing metric {label}"))
         };
 
+        // The bar carries the percentage, so the footnote is the plain
+        // `Resets in …` every other window row shows — not the counters, which
+        // against Kimi's limit of 100 only restate the percentage.
         let (weekly_value, weekly_footnote) = find_footnote("Weekly quota");
-        assert_eq!(weekly_value, "26 / 100");
-        assert!(weekly_footnote.contains("74 remaining"));
-        assert!(
-            weekly_footnote.contains("4d 0h"),
-            "weekly reset countdown: {weekly_footnote}"
-        );
-        assert!(!weekly_footnote.contains("2026-05-27T")); // not a raw RFC3339
+        assert_eq!(weekly_value, "26%");
+        assert_eq!(weekly_footnote, "Resets in 4d 0h");
 
         let (window_value, window_footnote) = find_footnote("Rolling window (5h)");
-        assert_eq!(window_value, "15 / 100");
-        assert!(window_footnote.contains("85 remaining"));
-        assert!(
-            window_footnote.contains("2h 00m"),
-            "window reset countdown: {window_footnote}"
-        );
-        assert!(!window_footnote.contains("2026-05-23T14")); // not a raw RFC3339
+        assert_eq!(window_value, "15%");
+        assert_eq!(window_footnote, "Resets in 2h 00m");
+    }
+
+    /// Every vendor holding both a short and a long window opens on the short
+    /// one — Claude's `Session (5h)`, Codex's `Codex 5h`, GLM's `Session (5h)`,
+    /// OpenCode Go's `Rolling`. Kimi's rolling bucket is that window, so it
+    /// leads both projections this module feeds: the section list the Quattro
+    /// panel and the KDE plasmoid render in order, and the Overview's compact
+    /// cells.
+    #[test]
+    fn kimi_leads_with_the_rolling_window_like_every_other_two_window_vendor() {
+        let now = now();
+        let snap = KimiSnapshot {
+            plan: Some("LEVEL_INTERMEDIATE".into()),
+            weekly_limit: 100,
+            weekly_used: 26,
+            weekly_remaining: 74,
+            weekly_reset_at: Some(now + chrono::Duration::days(4)),
+            window_limit: 100,
+            window_used: 15,
+            window_remaining: 85,
+            window_reset_at: Some(now + chrono::Duration::hours(2)),
+        };
+        let sections = sections_for(&ready(VendorSnapshot::Kimi(snap.clone())), now, 5);
+        let labels: Vec<&str> = sections
+            .iter()
+            .filter_map(|s| match s {
+                Section::Metric { label, .. } => Some(label.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, ["Rolling window (5h)", "Weekly quota"]);
+
+        let (_, cells) = compact_cells(&VendorSnapshot::Kimi(snap));
+        let texts: Vec<&str> = cells.iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(texts, ["5h 15%", "wk 26%"]);
     }
 
     fn tavily_snap() -> crate::usage::TavilySnapshot {

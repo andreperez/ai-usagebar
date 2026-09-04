@@ -1,6 +1,6 @@
 # ai-usagebar
 
-Native Omarchy Quattro panel, Waybar widget, and tabbed TUI for AI plan usage across **Claude**, **Codex/ChatGPT**, **Z.AI (GLM)**, **OpenRouter**, **DeepSeek**, **Kimi**, **Nous Research**, **OpenCode Go**, and other supported AI coding services.
+Native Omarchy Quattro panel, Waybar widget, and tabbed TUI for AI plan usage across **Claude**, **Codex/ChatGPT**, **GitHub Copilot**, **Z.AI (GLM)**, **OpenRouter**, **DeepSeek**, **Kimi**, **Nous Research**, **OpenCode Go**, **Command Code**, and other supported AI coding services.
 
 ai-usagebar began as a Rust port of
 [`claudebar`](https://github.com/mryll/claudebar) and remains drop-in
@@ -211,15 +211,16 @@ come from environment variables or `config.toml`.
 | Claude | OAuth from `~/.claude/.credentials.json` or the macOS login Keychain | Run `claude` once. Tokens refresh automatically. |
 | Anthropic API | Organization Admin key | Opt in with `ANTHROPIC_ADMIN_KEY` or `[anthropic_api] api_key`. Inference and Claude Code keys do not work. |
 | Codex | OAuth, read from `~/.codex/auth.json` | Run `codex login` once. Token auto-refreshes. |
+| GitHub Copilot | GitHub CLI OAuth | Run `gh auth login --web`, then choose GitHub Copilot as the primary provider in Settings. ai-usagebar gets the token only with `gh auth token`; `GITHUB_COPILOT_TOKEN` is an optional explicit override. |
 | Z.AI | API key (`ZAI_API_KEY` env or `[zai] api_key` in config) | Set either. |
 | OpenRouter | API key (`OPENROUTER_API_KEY` env or `[openrouter] api_key` in config) | Set either. Named keys are supported. |
 | DeepSeek | API key (`DEEPSEEK_API_KEY` or config) | Set either and opt in. |
-| Kimi | API key (`KIMI_API_KEY` or config) | Set either and opt in. |
+| Kimi | Existing Kimi Code CLI login **or** API key (`KIMI_API_KEY` or config) | Opt in, then either log in with `kimi` (nothing to paste) or set an API key, which wins when present. A Kimi For Coding subscription can issue one at kimi.com/code/console. |
 | Kilo | API key (`KILO_API_KEY` env or `[kilo] api_key` in config) | Set either. Opt-in. For a team balance, also set `[kilo] organization_id`; omit it for the personal balance. |
 | Novita | API key (`NOVITA_API_KEY` env or `[novita] api_key` in config) | Set either. Opt-in. |
 | Moonshot | API key (`MOONSHOT_API_KEY` or config) | Opt in. Set region `cn` for CNY; `global` uses USD. |
 | Grok (xAI) | Management key | Opt in with `XAI_MANAGEMENT_KEY` or config. An inference key does not work. |
-| SuperGrok | Official Grok Build ACP extension | Opt in, install Grok Build, and run `grok login`. This reports subscription usage, not the Management API balance. |
+| SuperGrok | Existing `grok login` (its `auth.json` key, or its ACP extension) | Opt in, install Grok Build, and run `grok login`. This reports subscription usage, not the Management API balance. |
 | MiniMax | Token Plan subscription key | Opt in with `MINIMAX_API_KEY` or config. Choose the matching global or China region; pay-as-you-go keys do not work. |
 | Google Antigravity | Local Antigravity server | Opt in and keep Antigravity or an interactive `agy` session running. |
 | Cursor | Existing Cursor IDE or `cursor-agent` login | Opt in and sign in once. `cursor-agent` is the headless fallback. |
@@ -232,6 +233,7 @@ come from environment variables or `config.toml`.
 | Requesty | API key (`REQUESTY_API_KEY` env or `[requesty] api_key` in config) | Set either and opt in. Reports organization balance and, when the management key permits it, month-to-date spend, request, and token totals. |
 | ZenMux | Management API key (`ZENMUX_MANAGEMENT_API_KEY` env or `[zenmux] api_key` in config) | Set either and opt in. Standard inference keys do not work. Reports PAYG balance and subscription 5h/7d quotas when each endpoint is available. |
 | Vercel AI Gateway | API key or OIDC token (`AI_GATEWAY_API_KEY` env or `[vercel-ai-gateway] api_key` in config) | Set either and opt in. Reports credits and lifetime spend. Optional custom reporting is beta, billed per query, and requires a Pro or Enterprise plan. |
+| Command Code | Existing `commandcode` or pi login | Enable `[commandcode]` and sign in to either one once. No key to paste; `COMMANDCODE_API_KEY` overrides if you prefer one. |
 
 ### Nous credits and OpenCode Go
 
@@ -255,6 +257,31 @@ settings command over stdin and are never placed in QML command arguments. Cache
 entries are tied to the endpoint and a one-way key fingerprint, so changing
 accounts cannot reuse another account's fresh or stale usage.
 
+### Command Code
+
+Command Code meters spend rather than tokens, so its two rolling windows are
+priced in dollars: `$1.23 of $14.00` for the 5-hour window and `$5.24 of $35.00`
+for the weekly one, alongside the monthly credit that is left. The percentages
+the bar and the meters show are derived from those figures.
+
+**There is no key to enter, and no key field in the settings panel.**
+Command Code appears in the provider selector but not in the key list, the same
+way Claude, Codex, Cursor and Kiro do — enable `[commandcode]` and it works.
+
+Credentials are reused, never issued. The OAuth token comes from
+`~/.commandcode/auth.json` from the official CLI first, then
+`~/.pi/agent/auth.json`; `COMMANDCODE_API_KEY` outranks both. **The token is
+only ever read.**
+Refreshing it belongs to the CLI that owns the file, and writing back from here
+would race the harnesses that share it; an expired token is reported as expired
+instead. Set `[commandcode] auth_paths` to search somewhere else entirely.
+
+The plan's monthly allowance is not reported by the API, so a small table maps
+the plan id to it (GOAT → $70, and so on). An unrecognised plan keeps its id
+and simply omits the "spent of allowance" line rather than inventing a
+denominator. Cache entries are tied to the endpoint and a one-way token
+fingerprint, so changing accounts cannot reuse another account's usage.
+
 #### Grok: team-scoped vs organization-scoped keys
 
 The balance lives at `/v1/billing/teams/{team}/prepaid/balance`, so a team has to
@@ -273,8 +300,9 @@ rather than silently querying the wrong URL.
 
 ### Enabling a vendor
 
-`enabled = true` is what makes a vendor fetch. Anthropic API, DeepSeek, Kimi,
-Kilo, Novita, Moonshot, Grok, SuperGrok, Antigravity, Cursor, MiniMax, and Kiro CLI all default to **disabled** so that existing
+`enabled = true` is what makes a vendor fetch. Anthropic API, GitHub Copilot,
+DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok, SuperGrok, Antigravity, Cursor,
+MiniMax, and Kiro CLI all default to **disabled** so that existing
 installs are unaffected until you opt in. Use either method:
 
 - Use the gear or `s` in the Omarchy panel, or run
@@ -286,8 +314,23 @@ installs are unaffected until you opt in. Use either method:
   without storing the key in `config.toml`; saving also creates missing provider
   sections with their default values.
 
-The primary-vendor selector only offers vendors that are currently enabled, so a
-vendor you haven't opted into cannot be set as primary.
+The primary-vendor selector only offers enabled vendors, except GitHub Copilot:
+after signing in with GitHub CLI, selecting it as primary explicitly enables
+`[copilot]` at the same time.
+
+Vendors that authenticate through a local login rather than a key — Cursor,
+Kiro CLI, SuperGrok, Antigravity, and Kimi when you have a Kimi For Coding
+subscription — have no key to save, so enable them with `enabled = true` in
+`config.toml`.
+
+GitHub Copilot has no token field in the Omarchy or terminal Settings forms.
+Run `gh auth login --web`, then select **GitHub Copilot** under **Primary
+Provider** and save. That enables `[copilot]` and sets it as primary, making it
+fetchable. At fetch time ai-usagebar runs only the fixed, structured
+`gh auth token` command; it never parses GitHub CLI configuration, credential
+stores, editor state, or browser state, and never writes the token to config or
+cache. `GITHUB_COPILOT_TOKEN` is an optional explicit environment override and
+takes precedence over GitHub CLI OAuth.
 
 ### Credential resolution order (for API-key vendors)
 
@@ -350,6 +393,7 @@ display option, account path, region, and API-key setting.
 ai-usagebar                        # uses [ui] primary (defaults to anthropic)
 ai-usagebar --vendor anthropic_api
 ai-usagebar --vendor openai
+ai-usagebar --vendor copilot
 ai-usagebar --vendor zai
 ai-usagebar --vendor openrouter
 ai-usagebar --vendor deepseek
@@ -569,6 +613,27 @@ If you'd rather see them all at once:
 ```
 
 > Why 300s? The Anthropic and OpenAI Codex endpoints are undocumented and rate-limit aggressively below ~300s. The cache TTL is 60s so multi-monitor instances coexist, but Waybar's polling interval should stay at 300s.
+
+### Multiple Codex accounts
+
+Two ChatGPT subscriptions, each its own login:
+
+```bash
+CODEX_HOME=~/.codex-work codex login
+```
+
+```toml
+[[openai.accounts]]
+label = "work"
+codex_auth_path = "~/.codex-work/auth.json"
+```
+
+```bash
+ai-usagebar --vendor openai --account work
+```
+
+Each account keeps its own cache and refreshes independently. Without
+`--account`, the default `codex_auth_path` login is used exactly as before.
 
 ### Multiple Claude accounts
 

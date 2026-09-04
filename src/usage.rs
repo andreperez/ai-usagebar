@@ -163,11 +163,12 @@ fn fmt_minor_units(minor: i64, currency: &str) -> String {
     format!("{sign}{} minor units {currency}", minor.unsigned_abs())
 }
 
-/// Format an amount in minor units with its own currency and scale. Rendering
-/// R$ 141.57 as "$141.57" is a claim about the wrong currency — the same class
-/// of defect as a fabricated number. Known codes get their symbol (mirroring
-/// `deepseek::format_money`); anything else renders as `AMOUNT CODE`, which is
-/// still truthful.
+/// Format an amount in minor units with its own currency and scale.
+///
+/// The scale is this function's own — `money` cannot express a zero- or
+/// three-decimal currency — but the *symbol* comes from
+/// [`crate::format::with_currency`], so the two cannot disagree about what a
+/// given code looks like.
 pub fn fmt_minor(minor: i64, decimal_places: u32, currency: Option<&str>) -> String {
     let scale = 10_u64.pow(decimal_places);
     // `unsigned_abs`, not negation: `-i64::MIN` overflows. Unreachable from
@@ -184,14 +185,7 @@ pub fn fmt_minor(minor: i64, decimal_places: u32, currency: Option<&str>) -> Str
             width = decimal_places as usize
         )
     };
-    match currency {
-        None | Some("USD") => format!("{sign}${number}"),
-        Some("BRL") => format!("{sign}R${number}"),
-        Some("EUR") => format!("{sign}€{number}"),
-        Some("GBP") => format!("{sign}£{number}"),
-        Some("JPY") | Some("CNY") => format!("{sign}¥{number}"),
-        Some(other) => format!("{sign}{number} {other}"),
-    }
+    crate::format::with_currency(sign, &number, currency)
 }
 
 /// DeepSeek — credit balance from `/user/balance`.
@@ -340,6 +334,7 @@ impl KimiSnapshot {
 pub enum VendorSnapshot {
     Anthropic(AnthropicSnapshot),
     Openai(OpenAiSnapshot),
+    Copilot(crate::copilot::types::Snapshot),
     Zai(ZaiSnapshot),
     Openrouter(OpenRouterSnapshot),
     Deepseek(DeepseekSnapshot),
@@ -362,6 +357,7 @@ pub enum VendorSnapshot {
     Requesty(RequestySnapshot),
     ZenMux(ZenMuxSnapshot),
     VercelGateway(VercelGatewaySnapshot),
+    CommandCode(crate::commandcode::types::Snapshot),
 }
 
 /// Parallel Account API organization billing mode and balance, where cents are
@@ -592,8 +588,10 @@ pub struct VercelReport {
 impl Eq for VercelReport {}
 
 /// Google Antigravity 2.0 / CLI snapshot. The API groups models into Gemini
-/// and third-party (Claude/GPT) buckets, and each group carries its own 5-hour
-/// and weekly window — four independent windows in total.
+/// and third-party (Claude/GPT) buckets, and each group may carry a 5-hour and
+/// a weekly window — up to four, and not every product or plan offers all of
+/// them. Antigravity CLI 1.1.22 returns weekly buckets only, so every window is
+/// optional and a snapshot is valid when at least one arrived.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AntigravitySnapshot {
     pub plan: String,
@@ -601,9 +599,9 @@ pub struct AntigravitySnapshot {
     /// cache written for one Google account is not served for another.
     pub account: String,
     /// Gemini group, 5-hour window.
-    pub session: UsageWindow,
+    pub session: Option<UsageWindow>,
     /// Gemini group, weekly window.
-    pub weekly: UsageWindow,
+    pub weekly: Option<UsageWindow>,
     /// Claude/GPT group, 5-hour window.
     pub third_party_session: Option<UsageWindow>,
     /// Claude/GPT group, weekly window.

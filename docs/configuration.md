@@ -23,10 +23,11 @@ file.
 # Which active vendor the widget shows when --vendor is omitted, AND which tab
 # is selected when the TUI opens. Defaults to the first active provider.
 # Only an active vendor can be primary.
-# primary = "anthropic"   # anthropic | anthropic_api | openai | zai
+# primary = "anthropic"   # anthropic | anthropic_api | openai | copilot | zai
 #                         # | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | antigravity | cursor
 #                         # | minimax | kiro | nous | opencode-go | tavily | firecrawl | requesty | zenmux
+#                         # | vercel-ai-gateway | commandcode
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui
@@ -48,6 +49,10 @@ api_key_env = "ANTHROPIC_ADMIN_KEY"
 [openai]
 enabled = true
 # codex_auth_path = "/home/you/.codex/auth.json"
+
+[copilot]
+enabled = false           # opt in after `gh auth login --web`
+# Uses `gh auth token`; GITHUB_COPILOT_TOKEN is an optional explicit override.
 
 [zai]
 enabled = true
@@ -72,9 +77,16 @@ api_key_env = "DEEPSEEK_API_KEY"
 # api_key = "sk-..."       # used if DEEPSEEK_API_KEY is unset; chmod 600 the file!
 
 [kimi]
-enabled = true             # disabled by default; enable once you add an API key
+enabled = true             # disabled by default; a Kimi Code CLI login is enough
+# Log in with `kimi` and ai-usagebar reads the OAuth session the CLI already
+# stored, refreshing it in place when it expires — no key to create or paste.
+# An API key still wins when one is set; a Kimi For Coding subscription can
+# issue one at kimi.com/code/console, and a platform key works too.
 api_key_env = "KIMI_API_KEY"
 # api_key = "sk-..."       # used if KIMI_API_KEY is unset; chmod 600 the file!
+# credentials_path = "~/.kimi-code/credentials/kimi-code.json"  # CLI login file
+# region = "auto"          # auto follows ~/.kimi-code/region
+#                          # cn -> api.kimi.com | global -> api.kimi.ai
 
 [minimax]
 enabled = true             # disabled by default; enable once you add an API key
@@ -111,11 +123,14 @@ api_key_env = "XAI_MANAGEMENT_KEY"
 
 [supergrok]
 enabled = true             # disabled by default; enable once you've run `grok login`
-# No API key: billing comes from the official Grok Build ACP process.
+# No API key of its own: billing comes from Grok Build's documented HTTPS
+# endpoint using the `key` already in its auth.json (read-only, sent in one
+# Authorization header, never copied or rewritten), or from its ACP process.
 # Defaults to $GROK_HOME/bin/grok or ~/.grok/bin/grok. Override only when the
 # trusted official binary was installed elsewhere.
 # grok_binary = "/opt/grok/bin/grok"
-# Opaque cache-scope fingerprint inputs; neither file is parsed or copied.
+# Cache-scope fingerprint inputs. config.toml is read as opaque bytes only;
+# auth.json is also read for its billing `key`. Neither is copied or written.
 # auth_path = "/home/you/.grok/auth.json"
 # config_path = "/home/you/.grok/config.toml"
 
@@ -183,3 +198,30 @@ report_cache_ttl_seconds = 21600  # 300..86400; separate report-cache TTL
 For more than one OpenRouter key, see the
 [OpenRouter account guide](openrouter-accounts.md). The existing singular
 `[openrouter]` key remains the default account and needs no migration.
+
+### GitHub Copilot
+
+GitHub Copilot uses the OAuth login managed by the official GitHub CLI. Run
+`gh auth login --web`, then select **GitHub Copilot** under **Primary Provider**
+in the Omarchy settings form and save; this enables `[copilot]` and sets it as
+the primary provider. The normal fetch path runs only the fixed structured
+command `gh auth token`. ai-usagebar never parses GitHub CLI configuration or
+credential stores and never writes the OAuth token to its config or cache.
+
+`GITHUB_COPILOT_TOKEN` is an optional explicit environment override. It takes
+precedence over `gh auth token`, which can be useful for a managed runtime that
+provides its own short-lived token. Do not put that token in `config.toml`.
+
+For more than one Codex login, add `[[openai.accounts]]` — a label and that
+login's own `auth.json`, the same shape `[[anthropic.accounts]]` uses:
+
+```toml
+[[openai.accounts]]
+label = "work"
+codex_auth_path = "~/.config/ai-usagebar/accounts/work-codex/auth.json"
+```
+
+Create the second login with `CODEX_HOME=~/.codex-work codex login` and point
+`codex_auth_path` at the file it writes. Select it with `--account work`; each
+account caches separately under `~/.cache/ai-usagebar/openai/<label>`. The
+singular `codex_auth_path` remains the default account and needs no migration.

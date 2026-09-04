@@ -102,6 +102,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "anthropic" => Some(VendorId::Anthropic),
         "anthropic_api" => Some(VendorId::AnthropicApi),
         "openai" => Some(VendorId::Openai),
+        "copilot" => Some(VendorId::Copilot),
         "zai" => Some(VendorId::Zai),
         "openrouter" => Some(VendorId::Openrouter),
         "deepseek" => Some(VendorId::Deepseek),
@@ -123,6 +124,7 @@ fn parse_slug(s: &str) -> Option<VendorId> {
         "requesty" => Some(VendorId::Requesty),
         "zenmux" => Some(VendorId::ZenMux),
         "vercel-ai-gateway" => Some(VendorId::VercelGateway),
+        "commandcode" => Some(VendorId::CommandCode),
         _ => None,
     }
 }

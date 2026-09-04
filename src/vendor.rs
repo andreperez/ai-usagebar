@@ -42,6 +42,10 @@ pub(crate) const VENDOR_SECRET_ENV_VARS: &[&str] = &[
     "REQUESTY_API_KEY",
     "ZENMUX_MANAGEMENT_API_KEY",
     "AI_GATEWAY_API_KEY",
+    "COMMANDCODE_API_KEY",
+    "GITHUB_COPILOT_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
 ];
 
 pub(crate) fn vendor_secret_env_vars_to_remove(keep: &[&str]) -> Vec<&'static str> {
@@ -117,6 +121,7 @@ pub enum VendorId {
     #[serde(rename = "anthropic_api")]
     AnthropicApi,
     Openai,
+    Copilot,
     Zai,
     Openrouter,
     Deepseek,
@@ -143,6 +148,8 @@ pub enum VendorId {
     #[value(name = "vercel-ai-gateway")]
     #[serde(rename = "vercel-ai-gateway")]
     VercelGateway,
+    #[serde(rename = "commandcode")]
+    CommandCode,
 }
 
 impl VendorId {
@@ -151,6 +158,7 @@ impl VendorId {
             VendorId::Anthropic => "anthropic",
             VendorId::AnthropicApi => "anthropic_api",
             VendorId::Openai => "openai",
+            VendorId::Copilot => "copilot",
             VendorId::Zai => "zai",
             VendorId::Openrouter => "openrouter",
             VendorId::Deepseek => "deepseek",
@@ -172,6 +180,7 @@ impl VendorId {
             VendorId::Requesty => "requesty",
             VendorId::ZenMux => "zenmux",
             VendorId::VercelGateway => "vercel-ai-gateway",
+            VendorId::CommandCode => "commandcode",
         }
     }
 
@@ -183,6 +192,7 @@ impl VendorId {
             VendorId::Anthropic => "Claude",
             VendorId::AnthropicApi => "Anthropic API",
             VendorId::Openai => "Codex",
+            VendorId::Copilot => "GitHub Copilot",
             VendorId::Zai => "Z.AI",
             VendorId::Openrouter => "OpenRouter",
             VendorId::Deepseek => "DeepSeek",
@@ -204,6 +214,7 @@ impl VendorId {
             VendorId::Requesty => "Requesty",
             VendorId::ZenMux => "ZenMux",
             VendorId::VercelGateway => "Vercel AI Gateway",
+            VendorId::CommandCode => "Command Code",
         }
     }
 
@@ -216,6 +227,7 @@ impl VendorId {
             VendorId::Anthropic => "cld",
             VendorId::AnthropicApi => "aac",
             VendorId::Openai => "gpt",
+            VendorId::Copilot => "ghc",
             VendorId::Zai => "zai",
             VendorId::Openrouter => "opr",
             VendorId::Deepseek => "dsk",
@@ -237,6 +249,7 @@ impl VendorId {
             VendorId::Requesty => "rqy",
             VendorId::ZenMux => "zmx",
             VendorId::VercelGateway => "vag",
+            VendorId::CommandCode => "cmc",
         }
     }
 
@@ -245,6 +258,7 @@ impl VendorId {
             VendorId::Anthropic,
             VendorId::AnthropicApi,
             VendorId::Openai,
+            VendorId::Copilot,
             VendorId::Zai,
             VendorId::Openrouter,
             VendorId::Deepseek,
@@ -266,19 +280,16 @@ impl VendorId {
             VendorId::Requesty,
             VendorId::ZenMux,
             VendorId::VercelGateway,
+            VendorId::CommandCode,
         ]
     }
 }
 
-/// What a vendor returns from a successful fetch — snapshot + meta. Mirrors
-/// `anthropic::fetch::FetchOutcome` but vendor-agnostic.
-#[derive(Debug, Clone)]
-pub struct VendorOutcome {
-    pub snapshot: VendorSnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<std::time::Duration>,
-}
+/// What a vendor returns from a successful fetch — the same
+/// [`Outcome`](crate::outcome::Outcome) every vendor produces, once its own
+/// snapshot type has been widened to [`VendorSnapshot`]. Each vendor gets
+/// there with a single `outcome.map(VendorSnapshot::Whichever)`.
+pub type VendorOutcome = crate::outcome::Outcome<VendorSnapshot>;
 
 /// Options forwarded to renderers from the CLI.
 #[derive(Debug, Clone)]
@@ -395,6 +406,7 @@ mod tests {
             "FIRECRAWL_API_KEY",
             "REQUESTY_API_KEY",
             "ZENMUX_MANAGEMENT_API_KEY",
+            "GITHUB_COPILOT_TOKEN",
         ];
         for name in configured_defaults {
             assert!(VENDOR_SECRET_ENV_VARS.contains(&name), "missing {name}");
@@ -409,6 +421,12 @@ mod tests {
         assert!(removed.contains(&"ANTHROPIC_ADMIN_KEY"));
         assert!(removed.contains(&"OPENROUTER_API_KEY"));
         assert_eq!(removed.len(), VENDOR_SECRET_ENV_VARS.len() - 2);
+    }
+
+    #[test]
+    fn copilot_token_is_removed_before_unrelated_subprocesses_launch() {
+        let removed = vendor_secret_env_vars_to_remove(&[]);
+        assert!(removed.contains(&"GITHUB_COPILOT_TOKEN"));
     }
 
     #[tokio::test]

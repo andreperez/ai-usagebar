@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 
-use crate::cache::{Cache, LockGuard, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, LockGuard, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::AnthropicSnapshot;
 
@@ -41,17 +41,9 @@ impl Default for Endpoints {
 }
 
 /// What we ultimately hand back to the renderer.
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: AnthropicSnapshot,
-    /// True if this snapshot came from the on-disk cache because the live
-    /// fetch failed — the widget shows a `⏸` indicator in this case.
-    pub stale: bool,
-    /// Last fetch error, if any — drives the `.last_error` tooltip line.
-    pub last_error: Option<(u16, String)>,
-    /// When the on-disk cache was written. Drives the "Updated HH:MM" line.
-    pub cache_age: Option<Duration>,
-}
+/// This vendor's [`Outcome`](crate::outcome::Outcome) — the shared shape,
+/// specialised to its snapshot.
+pub type FetchOutcome = crate::outcome::Outcome<AnthropicSnapshot>;
 
 /// High-level entry point. Reads creds, refreshes if needed, fetches usage,
 /// writes back the cache, and returns the snapshot — falling back to cache on
@@ -167,28 +159,32 @@ pub async fn fetch_snapshot(
         Ok(Ok(bytes)) => {
             cache.write_payload(&bytes)?;
             let snap = parse_payload(&bytes, plan_label.clone())?;
-            Ok(FetchOutcome {
-                snapshot: snap,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snap))
         }
         Ok(Err(AppError::Http { status, body })) => {
             cache.mark_stale();
             let last_error = Some(cache.write_last_error(status, &body));
-            fallback_to_cache(cache, plan_label, last_error)
+            fallback_to_cache(
+                cache,
+                plan_label,
+                last_error,
+                AppError::Http { status, body },
+            )
         }
         Ok(Err(e)) if e.is_transient() => {
             // Reuse cache silently; no last_error write.
-            fallback_to_cache_silent(cache, plan_label)
+            fallback_to_cache_silent(cache, plan_label, e)
         }
         Ok(Err(e)) => {
             cache.mark_stale();
             let last_error = Some(cache.write_last_error(0, &e.to_string()));
-            fallback_to_cache(cache, plan_label, last_error)
+            fallback_to_cache(cache, plan_label, last_error, e)
         }
-        Err(_elapsed) => fallback_to_cache_silent(cache, plan_label),
+        Err(_elapsed) => fallback_to_cache_silent(
+            cache,
+            plan_label,
+            AppError::Transport("usage request timed out".into()),
+        ),
     }
 }
 
@@ -212,64 +208,41 @@ fn reuse_cache(
     stale: bool,
 ) -> Result<FetchOutcome> {
     let snap = parse_payload(&bytes, plan_label)?;
-    Ok(FetchOutcome {
-        snapshot: snap,
-        stale,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
-    })
+    Ok(crate::outcome::Outcome::cached(snap, cache, stale))
 }
 
 fn fallback_to_cache(
     cache: &Cache,
     plan_label: String,
     last_error: Option<(u16, String)>,
+    original: AppError,
 ) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(AppError::Other("no usable cache".into()));
-    };
-    let snap = parse_payload(&bytes, plan_label)?;
-    Ok(FetchOutcome {
-        snapshot: snap,
-        stale: true,
-        last_error,
-        cache_age: cache.payload_age(),
+    crate::outcome::fallback(cache, last_error, original, |bytes| {
+        parse_payload(bytes, plan_label)
     })
 }
 
-fn fallback_to_cache_silent(cache: &Cache, plan_label: String) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(AppError::Transport(
-            "no cache and network unreachable".into(),
-        ));
-    };
-    let snap = parse_payload(&bytes, plan_label)?;
-    Ok(FetchOutcome {
-        snapshot: snap,
-        stale: true,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
+fn fallback_to_cache_silent(
+    cache: &Cache,
+    plan_label: String,
+    original: AppError,
+) -> Result<FetchOutcome> {
+    crate::outcome::fallback(cache, None, original, |bytes| {
+        parse_payload(bytes, plan_label)
     })
 }
 
+/// The one place a *synthesized* error beats the original: the refresh failed,
+/// and "run `claude` to re-auth" tells the user what to do about it, which the
+/// underlying OAuth error does not.
 fn handle_auth_failure(cache: &Cache, plan_label: String, transient: bool) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return if transient {
-            Err(AppError::Transport(
-                "no cache and refresh failed transiently".into(),
-            ))
-        } else {
-            Err(AppError::Credentials(
-                "token refresh failed; run `claude` to re-auth".into(),
-            ))
-        };
+    let original = if transient {
+        AppError::Transport("no cache and refresh failed transiently".into())
+    } else {
+        AppError::Credentials("token refresh failed; run `claude` to re-auth".into())
     };
-    let snap = parse_payload(&bytes, plan_label)?;
-    Ok(FetchOutcome {
-        snapshot: snap,
-        stale: true,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
+    crate::outcome::fallback(cache, None, original, |bytes| {
+        parse_payload(bytes, plan_label)
     })
 }
 

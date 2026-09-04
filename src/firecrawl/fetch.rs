@@ -6,7 +6,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::FirecrawlSnapshot;
 use crate::vendor::{MAX_BODY_BYTES, read_body_capped};
@@ -34,13 +34,7 @@ impl Default for Endpoints {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: FirecrawlSnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+pub type FetchOutcome = crate::outcome::Outcome<FirecrawlSnapshot>;
 
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
@@ -67,12 +61,7 @@ pub async fn fetch_snapshot(
             && cache.payload_age().is_some_and(|age| age < ttl)
             && let Ok(snapshot) = parse_cache(&bytes, &target)
         {
-            return Ok(FetchOutcome {
-                snapshot,
-                stale: false,
-                last_error: cache.read_last_error(),
-                cache_age: cache.payload_age(),
-            });
+            return Ok(crate::outcome::Outcome::cached(snapshot, cache, false));
         }
     }
 
@@ -126,19 +115,15 @@ pub async fn fetch_snapshot(
     if let Some((code, message)) = &secondary_error {
         cache.write_last_error(*code, message);
     }
-    Ok(FetchOutcome {
-        snapshot,
-        stale: false,
-        last_error: secondary_error,
-        cache_age: Some(Duration::ZERO),
-    })
+    let mut outcome = crate::outcome::Outcome::fresh(snapshot);
+    if let Some(pair) = secondary_error {
+        outcome.last_error = Some(pair);
+    }
+    Ok(outcome)
 }
 
 fn fallback_silent(cache: &Cache, target: &str, original: AppError) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(original);
-    };
-    reuse_cache(bytes, cache, target, true).or(Err(original))
+    crate::outcome::fallback(cache, None, original, |bytes| parse_cache(bytes, target))
 }
 
 fn fallback_with_error(
@@ -147,12 +132,9 @@ fn fallback_with_error(
     error_pair: (u16, String),
     original: AppError,
 ) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(original);
-    };
-    let mut outcome = reuse_cache(bytes, cache, target, true)?;
-    outcome.last_error = Some(error_pair);
-    Ok(outcome)
+    crate::outcome::fallback(cache, Some(error_pair), original, |bytes| {
+        parse_cache(bytes, target)
+    })
 }
 
 fn error_to_pair(error: &AppError) -> (u16, String) {
@@ -329,15 +311,6 @@ async fn fetch_one<T: for<'de> serde::Deserialize<'de>>(
     }
     serde_json::from_slice(&body)
         .map_err(|error| AppError::Schema(format!("Firecrawl response schema: {error}")))
-}
-
-fn reuse_cache(bytes: Vec<u8>, cache: &Cache, target: &str, stale: bool) -> Result<FetchOutcome> {
-    Ok(FetchOutcome {
-        snapshot: parse_cache(&bytes, target)?,
-        stale,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
-    })
 }
 
 #[cfg(test)]

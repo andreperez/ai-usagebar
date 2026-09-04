@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::{
     UsageWindow, ZenMuxPayg, ZenMuxQuota, ZenMuxSnapshot, ZenMuxStatus, ZenMuxSubscription,
@@ -39,13 +39,7 @@ impl Default for Endpoints {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: ZenMuxSnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+pub type FetchOutcome = crate::outcome::Outcome<ZenMuxSnapshot>;
 
 struct CachedSnapshot {
     snapshot: ZenMuxSnapshot,
@@ -72,12 +66,11 @@ pub async fn fetch_snapshot(
             && cache.payload_age().is_some_and(|age| age < ttl)
             && let Ok(cached) = parse_cache(&bytes, &target)
         {
-            return Ok(FetchOutcome {
-                snapshot: cached.snapshot,
-                stale: false,
-                last_error: cached.last_error,
-                cache_age: cache.payload_age(),
-            });
+            let mut outcome = crate::outcome::Outcome::cached(cached.snapshot, cache, false);
+            // The payload embeds the recorded error from the refresh that
+            // produced it; prefer it over the sidecar's current value.
+            outcome.last_error = cached.last_error;
+            return Ok(outcome);
         }
     }
 
@@ -120,12 +113,11 @@ pub async fn fetch_snapshot(
     if let Some((code, message)) = &secondary_error {
         cache.write_last_error(*code, message);
     }
-    Ok(FetchOutcome {
-        snapshot,
-        stale: false,
-        last_error: secondary_error,
-        cache_age: Some(Duration::ZERO),
-    })
+    let mut outcome = crate::outcome::Outcome::fresh(snapshot);
+    if let Some(pair) = secondary_error {
+        outcome.last_error = Some(pair);
+    }
+    Ok(outcome)
 }
 
 fn split_result<T>(result: Result<T>) -> (Option<T>, Option<AppError>) {
@@ -164,12 +156,9 @@ fn fallback_with_error(
     error_pair: (u16, String),
     original: AppError,
 ) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(original);
-    };
-    let mut outcome = reuse_cache(bytes, cache, target, true).or(Err(original))?;
-    outcome.last_error = Some(error_pair);
-    Ok(outcome)
+    crate::outcome::fallback(cache, Some(error_pair), original, |bytes| {
+        parse_cache(bytes, target).map(|cached| cached.snapshot)
+    })
 }
 
 fn error_to_pair(error: &AppError) -> (u16, String) {
@@ -477,16 +466,6 @@ async fn fetch_json<T: DeserializeOwned>(
     }
     serde_json::from_slice(&body)
         .map_err(|error| AppError::Schema(format!("ZenMux response schema: {error}")))
-}
-
-fn reuse_cache(bytes: Vec<u8>, cache: &Cache, target: &str, stale: bool) -> Result<FetchOutcome> {
-    let cached = parse_cache(&bytes, target)?;
-    Ok(FetchOutcome {
-        snapshot: cached.snapshot,
-        stale,
-        last_error: cached.last_error,
-        cache_age: cache.payload_age(),
-    })
 }
 
 #[cfg(test)]

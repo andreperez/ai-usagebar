@@ -13,11 +13,11 @@
 # active_vendors = ["anthropic", "openai", "firecrawl"]
 # Which active vendor the widget shows when `--vendor` is omitted, AND which tab
 # is selected when the TUI opens. Comment out to default to the first active provider.
-# Valid: anthropic | anthropic_api | openai | zai | openrouter | deepseek
+# Valid: anthropic | anthropic_api | openai | copilot | zai | openrouter | deepseek
 #        | kimi | kilo | novita | moonshot | grok | supergrok | antigravity
 #        | cursor | minimax | kiro | nous | opencode-go | tavily | firecrawl
 #        | requesty | zenmux
-#        | vercel-ai-gateway
+#        | vercel-ai-gateway | commandcode
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
@@ -107,6 +107,29 @@ enabled = true
 # consumes it: OpenAI usage comes only from Codex OAuth. Left commented out so
 # it isn't mistaken for a working alternative to `codex login`.
 # admin_key_env = "OPENAI_ADMIN_KEY"
+# Extra Codex logins, each its own auth.json — the same shape as
+# [[anthropic.accounts]], because Codex is an OAuth vendor too. Create a second
+# login with `CODEX_HOME=~/.codex-work codex login` and point at what it wrote.
+# Named accounts get isolated caches (~/.cache/ai-usagebar/openai/<label>) and
+# are selected with `--account <label>`; without it you get the default login
+# above, exactly as before.
+# [[openai.accounts]]
+# label = "work"
+# codex_auth_path = "~/.config/ai-usagebar/accounts/work-codex/auth.json"
+
+[copilot]
+# Disabled by default. GitHub Copilot quota comes from the private endpoint
+# used by VS Code. Sign in with the official GitHub CLI first:
+#   gh auth login --web
+# ai-usagebar obtains the OAuth token only by running `gh auth token`; it never
+# reads, copies, or stores a GitHub CLI, editor, or browser credential.
+# Set GITHUB_COPILOT_TOKEN only as an optional explicit environment override.
+# In Omarchy Settings, select GitHub Copilot as Primary Provider to enable it.
+enabled = false
+# Path to the official GitHub CLI. Unset looks `gh` up on PATH, which is how it
+# is normally installed; set this to pin the executable that runs on every
+# refresh.
+# gh_binary = "/usr/bin/gh"
 
 [zai]
 enabled = true
@@ -138,7 +161,12 @@ api_key_env = "DEEPSEEK_API_KEY"  # checked first; if set + non-empty, used
 # api_key = "sk-..."              # fallback; chmod 600 the file if you use it
 
 [kimi]
-# Disabled by default — enable once you've set a key (env var or inline).
+# Disabled by default. Two ways to authenticate:
+#   1. An existing Kimi Code CLI login: log in with `kimi` and just set
+#      `enabled = true` — nothing to create or paste. ai-usagebar reads the
+#      CLI's own OAuth session and refreshes it in place.
+#   2. An API key (env var or inline), which takes precedence when set. A Kimi
+#      For Coding subscription can issue one at kimi.com/code/console.
 # Saving a key in the Settings overlay writes the inline fallback AND flips
 # `enabled` to true; clearing the field removes the inline key again.
 # Shows Kimi Code subscription quota (weekly + 5h rolling window) from the
@@ -146,6 +174,9 @@ api_key_env = "DEEPSEEK_API_KEY"  # checked first; if set + non-empty, used
 enabled = false
 api_key_env = "KIMI_API_KEY"      # checked first; if set + non-empty, used
 # api_key = "sk-..."              # fallback; chmod 600 the file if you use it
+# credentials_path = "~/.kimi-code/credentials/kimi-code.json"  # CLI login file
+# region = "auto"                 # auto follows ~/.kimi-code/region;
+#                                 # cn -> api.kimi.com | global -> api.kimi.ai
 
 # --- Account-balance vendors -------------------------------------------------
 # These report your REMAINING credit as money, rather than plan usage as a %.
@@ -359,3 +390,16 @@ api_key_env = "AI_GATEWAY_API_KEY" # API key or Vercel OIDC token environment va
 # api_key = "..."                 # fallback; chmod 600 the file if you use it
 report_enabled = false
 report_cache_ttl_seconds = 21600
+
+# Command Code (commandcode.ai). Disabled by default — enable it once any
+# local agent harness is signed in. There is no key to paste: the OAuth
+# credential written by the official `commandcode` CLI is reused as-is, and
+# it is only ever read, never refreshed or rewritten.
+[commandcode]
+enabled = false
+# Override where the credential is looked for. Leave commented out to search,
+# in order:
+#   ~/.commandcode/auth.json   (official command-code CLI)
+#   ~/.pi/agent/auth.json
+# COMMANDCODE_API_KEY in the environment outranks both.
+# auth_paths = ["~/.commandcode/auth.json"]

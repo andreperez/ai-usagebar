@@ -116,7 +116,7 @@ pub struct Cli {
     #[arg(long, value_name = "FILE")]
     pub creds_path: Option<std::path::PathBuf>,
 
-    /// Select a named Claude or OpenRouter account from the matching
+    /// Select a named Claude, OpenRouter, or Codex (OpenAI) account from the matching
     /// `[[...accounts]]` config array. Without it, the vendor's default account
     /// and original cache path are unchanged. For Claude it conflicts with the
     /// lower-level `--creds-path` because both select a credential source.
@@ -291,6 +291,7 @@ pub enum Vendor {
     #[value(name = "anthropic_api")]
     AnthropicApi,
     Openai,
+    Copilot,
     Zai,
     Openrouter,
     Deepseek,
@@ -316,6 +317,8 @@ pub enum Vendor {
     ZenMux,
     #[value(name = "vercel-ai-gateway")]
     VercelGateway,
+    #[value(name = "commandcode")]
+    CommandCode,
 }
 
 impl Vendor {
@@ -324,6 +327,7 @@ impl Vendor {
             Vendor::Anthropic => crate::vendor::VendorId::Anthropic,
             Vendor::AnthropicApi => crate::vendor::VendorId::AnthropicApi,
             Vendor::Openai => crate::vendor::VendorId::Openai,
+            Vendor::Copilot => crate::vendor::VendorId::Copilot,
             Vendor::Zai => crate::vendor::VendorId::Zai,
             Vendor::Openrouter => crate::vendor::VendorId::Openrouter,
             Vendor::Deepseek => crate::vendor::VendorId::Deepseek,
@@ -345,6 +349,7 @@ impl Vendor {
             Vendor::Requesty => crate::vendor::VendorId::Requesty,
             Vendor::ZenMux => crate::vendor::VendorId::ZenMux,
             Vendor::VercelGateway => crate::vendor::VendorId::VercelGateway,
+            Vendor::CommandCode => crate::vendor::VendorId::CommandCode,
         }
     }
 }
@@ -420,6 +425,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::Anthropic => Vendor::Anthropic,
         crate::vendor::VendorId::AnthropicApi => Vendor::AnthropicApi,
         crate::vendor::VendorId::Openai => Vendor::Openai,
+        crate::vendor::VendorId::Copilot => Vendor::Copilot,
         crate::vendor::VendorId::Zai => Vendor::Zai,
         crate::vendor::VendorId::Openrouter => Vendor::Openrouter,
         crate::vendor::VendorId::Deepseek => Vendor::Deepseek,
@@ -441,6 +447,7 @@ fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
         crate::vendor::VendorId::Requesty => Vendor::Requesty,
         crate::vendor::VendorId::ZenMux => Vendor::ZenMux,
         crate::vendor::VendorId::VercelGateway => Vendor::VercelGateway,
+        crate::vendor::VendorId::CommandCode => Vendor::CommandCode,
     }
 }
 
@@ -493,6 +500,8 @@ mod tests {
         assert_eq!(nous.vendor, Some(Vendor::NousResearch));
         let opencode = Cli::parse_from(["ai-usagebar", "--vendor", "opencode-go"]);
         assert_eq!(opencode.vendor, Some(Vendor::OpenCodeGo));
+        let copilot = Cli::parse_from(["ai-usagebar", "--vendor", "copilot"]);
+        assert_eq!(copilot.vendor, Some(Vendor::Copilot));
         let login = Cli::parse_from(["ai-usagebar", "auth", "nous", "login"]);
         assert!(matches!(login.command, Some(Command::Auth { .. })));
     }

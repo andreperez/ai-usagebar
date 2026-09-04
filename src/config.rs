@@ -4,6 +4,7 @@
 //! ```toml
 //! [anthropic]  enabled = true
 //! [openai]     enabled = true   # Codex OAuth from ~/.codex/auth.json
+//! [copilot]    enabled = false  # GitHub CLI OAuth, or an explicit env override
 //! [zai]        enabled = true
 //! [openrouter] enabled = true
 //! [deepseek]   enabled = false
@@ -41,6 +42,7 @@ pub struct Config {
     pub anthropic: AnthropicConfig,
     pub anthropic_api: AnthropicApiConfig,
     pub openai: OpenAiConfig,
+    pub copilot: CopilotConfig,
     pub zai: ZaiConfig,
     pub openrouter: OpenRouterConfig,
     pub deepseek: DeepseekConfig,
@@ -64,6 +66,7 @@ pub struct Config {
     pub zenmux: ZenMuxConfig,
     #[serde(rename = "vercel-ai-gateway")]
     pub vercel_gateway: VercelGatewayConfig,
+    pub commandcode: CommandCodeConfig,
     /// Accepts configuration written by the removed provider without restoring
     /// it to the runtime provider set.
     #[serde(rename = "github-copilot", skip_serializing)]
@@ -517,6 +520,12 @@ pub struct OpenAiConfig {
     pub enabled: bool,
     /// Override the Codex auth file path (defaults to `~/.codex/auth.json`).
     pub codex_auth_path: Option<PathBuf>,
+    /// Extra Codex logins, each its own `auth.json`. Same shape as
+    /// [`AnthropicAccount`] and for the same reason: Codex is an OAuth vendor,
+    /// so an account *is* a credential file, and `openai::creds::write_back`
+    /// refreshes into whichever one it read.
+    #[serde(default)]
+    pub accounts: Vec<OpenAiAccount>,
     /// Reserved, and inert: names the env var an API-key-only path *would*
     /// read (admin key → `/v1/organization/costs`). Nothing consumes it —
     /// OpenAI usage comes solely from Codex OAuth. Kept because that path is
@@ -527,13 +536,97 @@ pub struct OpenAiConfig {
     pub admin_key_env: String,
 }
 
+/// One extra Codex login.
+///
+/// ```toml
+/// [[openai.accounts]]
+/// label = "work"
+/// codex_auth_path = "~/.config/ai-usagebar/accounts/work-codex/auth.json"
+/// ```
+///
+/// A second login is made with `CODEX_HOME=~/.codex-work codex login`; point
+/// `codex_auth_path` at the `auth.json` it writes.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OpenAiAccount {
+    /// Stable name used on the CLI (`--account <label>`) and as the cache
+    /// subdir (`~/.cache/ai-usagebar/openai/<label>`).
+    pub label: String,
+    /// Codex OAuth file for this account. Refreshed tokens are written back
+    /// here, so each account keeps itself alive independently.
+    pub codex_auth_path: PathBuf,
+}
+
+impl OpenAiConfig {
+    /// The auth file for `label`, or the singular/default one when `label` is
+    /// `None`. An unknown label is an error rather than a silent fall back to
+    /// the default account, which would report the wrong login's usage.
+    pub fn resolve_auth_path(&self, label: Option<&str>) -> Result<PathBuf> {
+        let Some(label) = label else {
+            return match &self.codex_auth_path {
+                Some(path) => Ok(path.clone()),
+                None => crate::openai::creds::default_path(),
+            };
+        };
+        self.accounts
+            .iter()
+            .find(|account| account.label == label)
+            .map(|account| account.codex_auth_path.clone())
+            .ok_or_else(|| {
+                AppError::Credentials(format!(
+                    "no OpenAI account named {label:?}. Add it under \
+                     [[openai.accounts]], or drop --account to use the default login."
+                ))
+            })
+    }
+}
+
 impl Default for OpenAiConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             codex_auth_path: None,
+            accounts: Vec::new(),
             admin_key_env: "OPENAI_ADMIN_KEY".to_string(),
         }
+    }
+}
+
+/// GitHub Copilot quota from the private endpoint used by VS Code. The token
+/// comes from an explicit environment override or the official GitHub CLI;
+/// this app never reads, copies, or writes GitHub credential stores.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CopilotConfig {
+    pub enabled: bool,
+    /// Path to the official GitHub CLI. Unset looks `gh` up on `PATH`, which
+    /// is how `gh` is normally installed; set it to pin the executable.
+    pub gh_binary: Option<PathBuf>,
+}
+
+impl CopilotConfig {
+    pub fn resolve_token(&self) -> Result<String> {
+        self.resolve_token_with(
+            |name| std::env::var_os(name),
+            &crate::copilot::credentials::SystemGhAuthTokenRunner,
+        )
+    }
+
+    fn resolve_token_with(
+        &self,
+        environment: impl Fn(&str) -> Option<std::ffi::OsString>,
+        runner: &impl crate::copilot::credentials::GhAuthTokenRunner,
+    ) -> Result<String> {
+        if let Some(value) = environment("GITHUB_COPILOT_TOKEN") {
+            let token = value.into_string().map_err(|_| {
+                AppError::Credentials(
+                    "GitHub Copilot: GITHUB_COPILOT_TOKEN is not valid UTF-8.".into(),
+                )
+            })?;
+            if !token.is_empty() {
+                return Ok(token);
+            }
+        }
+        crate::copilot::credentials::resolve_with(runner, self.gh_binary.as_deref())
     }
 }
 
@@ -549,6 +642,16 @@ pub struct OpenCodeGoConfig {
     pub enabled: bool,
     pub api_key_env: String,
     pub api_key: Option<String>,
+}
+
+/// Command Code reads the OAuth credential from the official CLI or pi, so it
+/// has no API key of its own. `auth_paths` overrides that search list for a
+/// non-standard install.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CommandCodeConfig {
+    pub enabled: bool,
+    pub auth_paths: Option<Vec<PathBuf>>,
 }
 
 impl Default for OpenCodeGoConfig {
@@ -844,7 +947,18 @@ impl Default for DeepseekConfig {
 pub struct KimiConfig {
     pub enabled: bool,
     pub api_key_env: String,
+    /// Optional: with no key set, the vendor falls back to the Kimi Code CLI's
+    /// own OAuth login, which is what a subscriber already has locally.
     pub api_key: Option<String>,
+    /// Override for kimi-code's credential file (default
+    /// `~/.kimi-code/credentials/kimi-code.json`), mirroring `[cursor] db_path`
+    /// and `[kiro] db_path`. Useful with a relocated `KIMI_CODE_HOME`.
+    pub credentials_path: Option<PathBuf>,
+    /// `"auto"` follows kimi-code's own install marker (`~/.kimi-code/region`);
+    /// `"cn"` pins `api.kimi.com` / `auth.kimi.com`, `"global"` pins
+    /// `api.kimi.ai` / `auth.kimi.ai`. A token minted by one deployment means
+    /// nothing to the other, so this picks the instance, not a currency.
+    pub region: String,
 }
 
 impl Default for KimiConfig {
@@ -853,6 +967,8 @@ impl Default for KimiConfig {
             enabled: false,
             api_key_env: "KIMI_API_KEY".to_string(),
             api_key: None,
+            credentials_path: None,
+            region: "auto".to_string(),
         }
     }
 }
@@ -1104,24 +1220,29 @@ pub fn resolve_api_key(
     resolve_api_key_in_section(vendor_label, &section, env_var_name, inline)
 }
 
+/// The env-then-inline lookup without the "or fail" ending, for vendors where
+/// an absent API key is a legitimate state rather than an error — Kimi accepts
+/// a Kimi Code CLI subscription login instead.
+pub fn optional_api_key(env_var_name: &str, inline: Option<&str>) -> Option<String> {
+    if is_valid_env_var_name(env_var_name)
+        && let Ok(v) = std::env::var(env_var_name)
+        && !v.is_empty()
+    {
+        return Some(v);
+    }
+    inline.filter(|v| !v.is_empty()).map(str::to_string)
+}
+
 fn resolve_api_key_in_section(
     vendor_label: &str,
     section: &str,
     env_var_name: &str,
     inline: Option<&str>,
 ) -> crate::error::Result<String> {
+    if let Some(key) = optional_api_key(env_var_name, inline) {
+        return Ok(key);
+    }
     let valid_env_name = is_valid_env_var_name(env_var_name);
-    if valid_env_name
-        && let Ok(v) = std::env::var(env_var_name)
-        && !v.is_empty()
-    {
-        return Ok(v);
-    }
-    if let Some(v) = inline
-        && !v.is_empty()
-    {
-        return Ok(v.to_string());
-    }
     let advice = if valid_env_name {
         "set an API key in a valid environment variable or set `api_key`"
     } else {
@@ -1162,7 +1283,7 @@ impl Config {
                 config.expand_paths();
                 config.validate()?;
                 #[cfg(unix)]
-                config.protect_inline_api_keys(path)?;
+                config.protect_inline_secrets(path)?;
                 Ok(config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -1179,18 +1300,23 @@ impl Config {
         expand_tilde_opt(&mut self.cursor.db_path);
         expand_tilde_opt(&mut self.cursor.agent_auth_path);
         expand_tilde_opt(&mut self.kiro.db_path);
+        expand_tilde_opt(&mut self.kimi.credentials_path);
         self.supergrok.grok_binary = expand_tilde(&self.supergrok.grok_binary);
         expand_tilde_opt(&mut self.supergrok.auth_path);
         expand_tilde_opt(&mut self.supergrok.config_path);
         for account in &mut self.anthropic.accounts {
             account.credentials_path = expand_tilde(&account.credentials_path);
         }
+        for account in &mut self.openai.accounts {
+            account.codex_auth_path = expand_tilde(&account.codex_auth_path);
+        }
     }
 
-    /// Explicitly enumerate every inline API-key field. Adding a new API-key
-    /// vendor must add it here so its config file receives the same protection.
+    /// Explicitly enumerate every inline credential field. Adding a new
+    /// credential vendor must add it here so its config receives the same
+    /// protection.
     #[cfg(unix)]
-    fn has_inline_api_keys(&self) -> bool {
+    fn has_inline_secrets(&self) -> bool {
         [
             self.zai.api_key.as_deref(),
             self.openrouter.api_key.as_deref(),
@@ -1220,21 +1346,21 @@ impl Config {
     }
 
     #[cfg(unix)]
-    fn protect_inline_api_keys(&self, path: &Path) -> Result<()> {
-        if !self.has_inline_api_keys() {
+    fn protect_inline_secrets(&self, path: &Path) -> Result<()> {
+        if !self.has_inline_secrets() {
             return Ok(());
         }
 
         let metadata = std::fs::metadata(path).map_err(|_| {
             AppError::Credentials(format!(
-                "config at {} contains inline api_key values but its permissions could not be checked; fix permissions or move keys to environment variables",
+                "config at {} contains inline credentials but its permissions could not be checked; fix permissions or move credentials to environment variables",
                 path.display()
             ))
         })?;
         if inline_key_permission_decision(metadata.mode()) == InlineKeyPermissionDecision::Tighten {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|_| {
                 AppError::Credentials(format!(
-                    "config at {} contains inline api_key values but is group/other-readable and could not be tightened to 0600; fix permissions or move keys to environment variables",
+                    "config at {} contains inline credentials but is group/other-readable and could not be tightened to 0600; fix permissions or move credentials to environment variables",
                     path.display()
                 ))
             })?;
@@ -1247,6 +1373,7 @@ impl Config {
             VendorId::Anthropic => self.anthropic.enabled,
             VendorId::AnthropicApi => self.anthropic_api.enabled,
             VendorId::Openai => self.openai.enabled,
+            VendorId::Copilot => self.copilot.enabled,
             VendorId::Zai => self.zai.enabled,
             VendorId::Openrouter => self.openrouter.enabled,
             VendorId::Deepseek => self.deepseek.enabled,
@@ -1268,6 +1395,7 @@ impl Config {
             VendorId::Requesty => self.requesty.enabled,
             VendorId::ZenMux => self.zenmux.enabled,
             VendorId::VercelGateway => self.vercel_gateway.enabled,
+            VendorId::CommandCode => self.commandcode.enabled,
         }
     }
 
@@ -1439,6 +1567,14 @@ impl Config {
                     .into(),
             ));
         }
+        if crate::kimi::oauth::Region::parse(&self.kimi.region).is_none()
+            && !self.kimi.region.eq_ignore_ascii_case("auto")
+        {
+            return Err(AppError::Other(format!(
+                "[kimi] region must be \"auto\", \"cn\", or \"global\", got {:?}",
+                self.kimi.region
+            )));
+        }
         if !self.minimax.region.eq_ignore_ascii_case("global")
             && !self.minimax.region.eq_ignore_ascii_case("cn")
         {
@@ -1465,6 +1601,16 @@ impl Config {
             if !labels.insert(&account.label) {
                 return Err(AppError::Credentials(format!(
                     "duplicate anthropic account label {:?}",
+                    account.label
+                )));
+            }
+        }
+        let mut openai_labels = HashSet::new();
+        for account in &self.openai.accounts {
+            validate_account_label_for("openai", &account.label)?;
+            if !openai_labels.insert(&account.label) {
+                return Err(AppError::Credentials(format!(
+                    "duplicate openai account label {:?}",
                     account.label
                 )));
             }
@@ -1602,6 +1748,73 @@ mod tests {
         f
     }
 
+    /// The back-compat guarantee #134 asks for: a config with no
+    /// `[[openai.accounts]]` resolves exactly what it resolved before, whether
+    /// it sets `codex_auth_path` or leaves it to the default.
+    #[test]
+    fn openai_without_accounts_resolves_the_singular_path() {
+        let explicit = OpenAiConfig {
+            codex_auth_path: Some(PathBuf::from("/tmp/codex/auth.json")),
+            ..OpenAiConfig::default()
+        };
+        assert_eq!(
+            explicit.resolve_auth_path(None).unwrap(),
+            PathBuf::from("/tmp/codex/auth.json")
+        );
+
+        let bare = OpenAiConfig::default();
+        assert_eq!(
+            bare.resolve_auth_path(None).unwrap(),
+            crate::openai::creds::default_path().unwrap(),
+            "no codex_auth_path must still mean ~/.codex/auth.json"
+        );
+    }
+
+    /// Each named account resolves its own file, and the default login is still
+    /// reachable alongside them.
+    #[test]
+    fn openai_named_accounts_resolve_their_own_auth_file() {
+        let config: Config = toml::from_str(
+            r#"
+            [openai]
+            codex_auth_path = "/tmp/personal/auth.json"
+            [[openai.accounts]]
+            label = "work"
+            codex_auth_path = "/tmp/work/auth.json"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.openai.resolve_auth_path(Some("work")).unwrap(),
+            PathBuf::from("/tmp/work/auth.json")
+        );
+        assert_eq!(
+            config.openai.resolve_auth_path(None).unwrap(),
+            PathBuf::from("/tmp/personal/auth.json")
+        );
+    }
+
+    /// An unknown label must fail rather than quietly fall back to the default
+    /// login — reporting the wrong subscription's usage is worse than an error.
+    #[test]
+    fn an_unknown_openai_account_is_an_error_not_a_fallback() {
+        let config = OpenAiConfig {
+            codex_auth_path: Some(PathBuf::from("/tmp/personal/auth.json")),
+            accounts: vec![OpenAiAccount {
+                label: "work".into(),
+                codex_auth_path: PathBuf::from("/tmp/work/auth.json"),
+            }],
+            ..OpenAiConfig::default()
+        };
+        let err = config
+            .resolve_auth_path(Some("nope"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nope"), "{err}");
+        assert!(err.contains("[[openai.accounts]]"), "{err}");
+    }
+
     #[test]
     fn defaults_enable_only_the_four_core_vendors() {
         let c = Config::default();
@@ -1611,6 +1824,7 @@ mod tests {
         assert!(c.is_enabled(VendorId::Openrouter));
         for opt_in in [
             VendorId::AnthropicApi,
+            VendorId::Copilot,
             VendorId::Deepseek,
             VendorId::Kimi,
             VendorId::Kilo,
@@ -1680,6 +1894,7 @@ mod tests {
         assert!(!config.is_enabled(VendorId::OpenCodeGo));
         assert_eq!(config.opencode_go.api_key_env, "OPENCODE_GO_API_KEY");
         assert!(config.opencode_go.api_key.is_none());
+        assert!(!config.is_enabled(VendorId::Copilot));
         assert!(!config.is_enabled(VendorId::Tavily));
         assert_eq!(config.tavily.api_key_env, "TAVILY_API_KEY");
         assert!(config.tavily.api_key.is_none());
@@ -1857,10 +2072,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn opencode_go_inline_key_is_protected_like_other_api_keys() {
+    fn inline_credentials_are_protected() {
         let mut config = Config::default();
         config.opencode_go.api_key = Some("<redacted>".to_string());
-        assert!(config.has_inline_api_keys());
+        assert!(config.has_inline_secrets());
     }
 
     #[cfg(unix)]
@@ -1896,7 +2111,7 @@ mod tests {
             api_key_env: None,
             api_key: Some("<redacted>".into()),
         });
-        assert!(config.has_inline_api_keys());
+        assert!(config.has_inline_secrets());
     }
 
     #[test]
@@ -2039,6 +2254,59 @@ enabled = false
     }
 
     #[test]
+    fn kimi_region_accepts_auto_and_both_deployments() {
+        for region in ["auto", "AUTO", "cn", "mainland-cn", "global"] {
+            let file = write_toml(&format!("[kimi]\nregion = {region:?}\n"));
+            assert_eq!(Config::load_from(file.path()).unwrap().kimi.region, region);
+        }
+
+        for region in ["", "us", "oversea"] {
+            let file = write_toml(&format!("[kimi]\nregion = {region:?}\n"));
+            let error = Config::load_from(file.path()).unwrap_err().to_string();
+            assert!(error.contains("[kimi] region"), "{error}");
+        }
+    }
+
+    #[test]
+    fn kimi_defaults_to_auto_region_and_no_credential_override() {
+        let defaults = KimiConfig::default();
+        assert_eq!(defaults.region, "auto");
+        assert_eq!(defaults.credentials_path, None);
+        assert!(!defaults.enabled);
+    }
+
+    #[test]
+    fn kimi_credentials_path_expands_a_tilde() {
+        let file = write_toml("[kimi]\ncredentials_path = \"~/kimi/creds.json\"\n");
+        let path = Config::load_from(file.path())
+            .unwrap()
+            .kimi
+            .credentials_path
+            .unwrap();
+        assert!(!path.starts_with("~"), "{}", path.display());
+        assert!(path.ends_with("kimi/creds.json"), "{}", path.display());
+    }
+
+    #[test]
+    fn optional_api_key_reports_absence_instead_of_failing() {
+        assert_eq!(
+            optional_api_key("KIMI_API_KEY_DEFINITELY_UNSET", Some("inline")),
+            Some("inline".to_string())
+        );
+        assert_eq!(
+            optional_api_key("KIMI_API_KEY_DEFINITELY_UNSET", None),
+            None
+        );
+        assert_eq!(optional_api_key("KIMI_API_KEY_UNSET", Some("")), None);
+        // An unusable `api_key_env` still lets an inline key through, exactly
+        // as `resolve_api_key` does.
+        assert_eq!(
+            optional_api_key("9INVALID", Some("inline")),
+            Some("inline".to_string())
+        );
+    }
+
+    #[test]
     fn context_monitor_is_opt_in_and_window_sizes_are_explicit() {
         let defaults = Config::default();
         assert!(!defaults.context.enabled);
@@ -2151,6 +2419,49 @@ enabled = false
         unsafe { std::env::remove_var(var) };
         let got = resolve_api_key("Zai", var, Some("inline-key")).unwrap();
         assert_eq!(got, "inline-key");
+    }
+
+    #[test]
+    fn copilot_token_prefers_explicit_environment_over_gh_cli() {
+        struct NeverRun;
+        impl crate::copilot::credentials::GhAuthTokenRunner for NeverRun {
+            fn run(
+                &self,
+                _: &crate::copilot::credentials::GhAuthTokenCommand,
+            ) -> std::io::Result<crate::copilot::credentials::GhAuthTokenOutput> {
+                panic!("environment override must not invoke gh")
+            }
+        }
+
+        let token = CopilotConfig::default()
+            .resolve_token_with(
+                |name| (name == "GITHUB_COPILOT_TOKEN").then(|| "from-environment".into()),
+                &NeverRun,
+            )
+            .unwrap();
+        assert_eq!(token, "from-environment");
+    }
+
+    #[test]
+    fn copilot_token_uses_injected_gh_cli_and_hides_failure_output() {
+        struct FailedGh;
+        impl crate::copilot::credentials::GhAuthTokenRunner for FailedGh {
+            fn run(
+                &self,
+                _: &crate::copilot::credentials::GhAuthTokenCommand,
+            ) -> std::io::Result<crate::copilot::credentials::GhAuthTokenOutput> {
+                Ok(crate::copilot::credentials::GhAuthTokenOutput {
+                    success: false,
+                    stdout: b"never-echo-gh-output".to_vec(),
+                })
+            }
+        }
+        let error = CopilotConfig::default()
+            .resolve_token_with(|_| None, &FailedGh)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("gh auth login --web"));
+        assert!(!error.contains("never-echo-gh-output"));
     }
 
     #[test]
@@ -2709,6 +3020,23 @@ enabled = false
             ..Default::default()
         };
         assert!(cfg.all_accounts().is_empty());
+    }
+
+    #[test]
+    fn openai_account_auth_paths_are_tilde_expanded_on_load() {
+        let f = write_toml(
+            r#"
+            [[openai.accounts]]
+            label = "work"
+            codex_auth_path = "~/.codex-work/auth.json"
+            "#,
+        );
+        let c = Config::load_from(f.path()).unwrap();
+        let home = crate::cache::home_dir().unwrap();
+        assert_eq!(
+            c.openai.accounts[0].codex_auth_path,
+            home.join(".codex-work/auth.json")
+        );
     }
 
     #[test]

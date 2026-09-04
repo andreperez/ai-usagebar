@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use crate::cache::{Cache, MAX_STALE, acquire_lock_async};
+use crate::cache::{Cache, acquire_lock_async};
 use crate::error::{AppError, Result};
 use crate::usage::TavilySnapshot;
 use crate::vendor::{MAX_BODY_BYTES, read_body_capped};
@@ -32,13 +32,7 @@ impl Default for Endpoints {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchOutcome {
-    pub snapshot: TavilySnapshot,
-    pub stale: bool,
-    pub last_error: Option<(u16, String)>,
-    pub cache_age: Option<Duration>,
-}
+pub type FetchOutcome = crate::outcome::Outcome<TavilySnapshot>;
 
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
@@ -55,12 +49,7 @@ pub async fn fetch_snapshot(
     if let Some(bytes) = cache.fresh_payload(cache_ttl)?
         && let Ok(snapshot) = parse_cache(&bytes, &target)
     {
-        return Ok(FetchOutcome {
-            snapshot,
-            stale: false,
-            last_error: cache.read_last_error(),
-            cache_age: cache.payload_age(),
-        });
+        return Ok(crate::outcome::Outcome::cached(snapshot, cache, false));
     }
     // A corrupt payload or a scope-fingerprint mismatch falls through to a
     // live fetch rather than serving stale or another project's numbers.
@@ -72,14 +61,9 @@ pub async fn fetch_snapshot(
                 "response": snapshot_repr(&snapshot),
             }))?;
             cache.write_payload(&body)?;
-            Ok(FetchOutcome {
-                snapshot,
-                stale: false,
-                last_error: None,
-                cache_age: Some(Duration::ZERO),
-            })
+            Ok(crate::outcome::Outcome::fresh(snapshot))
         }
-        Err(AppError::Transport(_)) => fallback_silent(cache, target),
+        Err(AppError::Transport(e)) => fallback_silent(cache, target, AppError::Transport(e)),
         Err(e) => {
             cache.mark_stale();
             if let Some((code, msg)) = error_to_pair(&e) {
@@ -90,25 +74,15 @@ pub async fn fetch_snapshot(
     }
 }
 
-fn fallback_silent(cache: &Cache, target: String) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(AppError::Transport("Tavily request timed out".into()));
-    };
-    reuse_cache(bytes, cache, target, true)
+fn fallback_silent(cache: &Cache, target: String, original: AppError) -> Result<FetchOutcome> {
+    crate::outcome::fallback(cache, None, original, |bytes| parse_cache(bytes, &target))
         .map_err(|_| AppError::Transport("Tavily request timed out".into()))
 }
 
 fn fallback_with_error(cache: &Cache, target: String, original: AppError) -> Result<FetchOutcome> {
-    let Some(bytes) = cache.fallback_payload(MAX_STALE)? else {
-        return Err(original);
-    };
-    match reuse_cache(bytes, cache, target, true) {
-        Ok(mut outcome) => {
-            outcome.last_error = error_to_pair(&original);
-            Ok(outcome)
-        }
-        Err(_) => Err(original),
-    }
+    crate::outcome::fallback(cache, error_to_pair(&original), original, |bytes| {
+        parse_cache(bytes, &target)
+    })
 }
 
 fn error_to_pair(e: &AppError) -> Option<(u16, String)> {
@@ -117,16 +91,6 @@ fn error_to_pair(e: &AppError) -> Option<(u16, String)> {
         AppError::Schema(_) => Some((0, SCHEMA_DRIFT_MESSAGE.into())),
         _ => Some((0, e.to_string())),
     }
-}
-
-fn reuse_cache(bytes: Vec<u8>, cache: &Cache, target: String, stale: bool) -> Result<FetchOutcome> {
-    let snapshot = parse_cache(&bytes, &target)?;
-    Ok(FetchOutcome {
-        snapshot,
-        stale,
-        last_error: cache.read_last_error(),
-        cache_age: cache.payload_age(),
-    })
 }
 
 /// Stable, non-secret identity for the endpoint, account, and optional project

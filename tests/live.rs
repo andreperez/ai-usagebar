@@ -40,6 +40,11 @@
 //!   window are optional, so the smoke test validates their public fields only
 //!   when present; the snapshot does not expose raw wire duration/unit.
 //!   `kimi_live` skips when optional `KIMI_API_KEY` is unset.
+//! - **Kimi (subscription)**: reads the Kimi Code CLI's own OAuth session,
+//!   refreshing it (and writing the rotation back to the CLI's credential
+//!   file) when it is close to expiry, then asserts the same public snapshot
+//!   fields. `kimi_subscription_live` skips when the CLI is not logged in and
+//!   `KIMI_CODE_HOME` is unset.
 //! - **Cursor**: reads the session token from the local `state.vscdb`, then
 //!   asserts `premium_pct` is 0..=100 and a future `premium_reset_at` was
 //!   derived from `startOfMonth`. `cursor_live` skips when there is no Cursor
@@ -401,6 +406,66 @@ async fn tavily_live() {
         out.snapshot.payg_limit,
         out.snapshot.key_used,
         out.snapshot.key_limit,
+    );
+}
+
+#[tokio::test]
+#[ignore = "live API; run with --ignored"]
+async fn kimi_subscription_live() {
+    // The subscription path has no API key — the credential is the OAuth
+    // session the Kimi Code CLI stored after its device-code login. So this
+    // test needs `kimi` installed and logged in (or `KIMI_CODE_HOME` pointing
+    // at a copy of that home) and skips otherwise, like `kiro_live`.
+    //
+    // It exercises the refresh too whenever the stored access token is inside
+    // its 2-minute buffer, which for a 15-minute token is most runs — and that
+    // rotation is written back to the CLI's own credential file, exactly as
+    // production does. Point `KIMI_CODE_HOME` at a copy if that matters to you.
+    let home = match std::env::var("KIMI_CODE_HOME") {
+        Ok(p) if !p.trim().is_empty() => std::path::PathBuf::from(p),
+        _ => kimi::oauth::default_home().expect("resolve home dir"),
+    };
+    let credentials = kimi::oauth::credentials_path_in(&home);
+    if !kimi::oauth::is_logged_in(&credentials) {
+        eprintln!(
+            "kimi_subscription_live: no Kimi Code CLI login at {} — skipping (run `kimi` and log in, or set KIMI_CODE_HOME)",
+            credentials.display()
+        );
+        return;
+    }
+
+    let region = kimi::oauth::read_region_marker(&home).unwrap_or(kimi::oauth::Region::MainlandCn);
+    let cache = xdg_cache_for("kimi-subscription");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let out = kimi::fetch::fetch_snapshot_with_auth(
+        &client,
+        &kimi::fetch::Auth::KimiCode(kimi::fetch::KimiCodeAuth::in_home(&home)),
+        &cache,
+        &kimi::fetch::Endpoints::for_region(region),
+        Duration::from_secs(0),
+    )
+    .await
+    .expect("kimi subscription fetch should succeed against the real API");
+
+    assert_pct("kimi.weekly", out.snapshot.weekly_pct());
+    if out.snapshot.window_limit > 0 {
+        assert_pct("kimi.window", out.snapshot.window_pct());
+    }
+    // The refresh must never leave the CLI without a usable login.
+    assert!(
+        kimi::oauth::is_logged_in(&credentials),
+        "the Kimi Code CLI credential file must still hold a login afterwards"
+    );
+    println!(
+        "✅ kimi (subscription) — plan={:?}, weekly={} / {}, window={} / {}",
+        out.snapshot.plan,
+        out.snapshot.weekly_used,
+        out.snapshot.weekly_limit,
+        out.snapshot.window_used,
+        out.snapshot.window_limit,
     );
 }
 
@@ -831,5 +896,72 @@ async fn minimax_live() {
             .video_session
             .as_ref()
             .map(|w| w.utilization_pct),
+    );
+}
+
+/// Command Code reuses whichever local agent harness is signed in, so this
+/// test needs no key of its own — it skips when nothing on the machine holds
+/// a credential.
+#[tokio::test]
+#[ignore]
+async fn commandcode_live() {
+    use ai_usagebar::commandcode;
+
+    let credential = match commandcode::creds::resolve(None) {
+        Ok(credential) => credential,
+        Err(error) => {
+            eprintln!("commandcode_live: {error} — skipping Command Code smoke test");
+            return;
+        }
+    };
+    let cache = xdg_cache_for("commandcode");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let endpoints = commandcode::fetch::Endpoints::default();
+    let out = commandcode::fetch::fetch_snapshot(
+        &client,
+        &credential.token,
+        &cache,
+        &endpoints,
+        Duration::from_secs(0),
+    )
+    .await
+    .expect("command code fetch should succeed against the real API");
+
+    // The ledger is load-bearing; the windows are what the bar leads with.
+    assert!(
+        out.snapshot.five_hour.is_some()
+            || out.snapshot.weekly.is_some()
+            || out.snapshot.credits.is_some(),
+        "commandcode returned neither a window nor a ledger"
+    );
+    for (label, window) in [
+        ("commandcode.five_hour", out.snapshot.five_hour.as_ref()),
+        ("commandcode.weekly", out.snapshot.weekly.as_ref()),
+    ] {
+        if let Some(window) = window {
+            assert_pct(label, window.pct());
+            assert!(window.cap > 0.0, "{label} reported a non-positive cap");
+            assert!(
+                window.resets_at.is_some(),
+                "{label} lost its reset timestamp — the API sends a ms epoch"
+            );
+        }
+    }
+    println!(
+        "✅ command code — plan={:?}, 5h={:?}, weekly={:?}, credits={:?} of pool {:?}",
+        out.snapshot.plan,
+        out.snapshot
+            .five_hour
+            .as_ref()
+            .map(|w| (w.used, w.cap, w.pct())),
+        out.snapshot
+            .weekly
+            .as_ref()
+            .map(|w| (w.used, w.cap, w.pct())),
+        out.snapshot.credits.as_ref().map(|c| c.remaining()),
+        out.snapshot.credit_pool,
     );
 }

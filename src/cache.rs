@@ -657,6 +657,33 @@ mod tests {
         );
     }
 
+    /// The cold-cache decision — serve a stale figure, or surface the error
+    /// that caused the refresh to fail — is `outcome::fallback`'s alone. It
+    /// drifted into two disagreeing generations once, when each vendor owned a
+    /// copy: five replaced the original error with a generic "no usable cache"
+    /// while thirteen returned it. `fallback_payload` is the entry point to
+    /// that decision, so a second caller is a second copy in the making.
+    #[test]
+    fn only_the_shared_fallback_reads_the_stale_payload() {
+        let mut sites = Vec::new();
+        for file in crate::guard::rs_files_in("src") {
+            if file.ends_with("outcome.rs") || file.ends_with("cache.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&file).expect("readable module");
+            for (n, line) in crate::guard::production_code(&source).lines().enumerate() {
+                if line.contains("fallback_payload(") {
+                    sites.push(format!("{}:{}", file.display(), n + 1));
+                }
+            }
+        }
+        assert!(
+            sites.is_empty(),
+            "reach the stale payload through `outcome::fallback`, which decides \
+             what a cold cache means for every vendor at once. Found: {sites:#?}"
+        );
+    }
+
     /// The bug this closes: the pair handed to the widget was built from the
     /// raw body in parallel with the redacted one going to disk, so the run
     /// that hit the `401` showed the body and only the *next* run showed the

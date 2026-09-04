@@ -37,14 +37,16 @@ pub fn warning_kind(code: u16, message: &str) -> WarningKind {
     }
 }
 
-pub const DEFAULT_FORMAT: &str = "{kimi_weekly_pct}% · {kimi_weekly_reset}";
+/// Kimi has two independent quota percentages. Keep both on the individual
+/// widget in the same order as the detail panel: current 5h window, then 7d.
+pub const DEFAULT_FORMAT: &str = "5h {kimi_window_pct}% · 7d {kimi_weekly_pct}%";
 
 /// Kimi reports the weekly quota's reset instant but never its length; the
 /// subscription bucket rolls every 7 days.
-const WEEKLY_WINDOW: chrono::Duration = chrono::Duration::days(7);
+pub const WEEKLY_WINDOW: chrono::Duration = chrono::Duration::days(7);
 /// The rolling bucket's length *is* advertised — 300 minutes — and only that
 /// spelling is accepted on the way in (`types::is_five_hour_window`).
-const ROLLING_WINDOW: chrono::Duration = chrono::Duration::hours(5);
+pub const ROLLING_WINDOW: chrono::Duration = chrono::Duration::hours(5);
 
 /// Project a quota pair onto the shared window shape the tooltip helper draws.
 fn window(pct: i32, resets_at: Option<DateTime<Utc>>, duration: chrono::Duration) -> UsageWindow {
@@ -176,46 +178,30 @@ fn render_tooltip(
         escape(plan)
     )));
 
-    // Kimi counts requests rather than reporting a percentage, which is why
-    // this block used to print bare `26 / 100  (26%)` pairs. The percentage is
-    // right there — project each quota onto a window and it draws like every
-    // other vendor, with the counts riding along on the reset line.
-    lines.push(TooltipLine::Body("".into()));
-    // `remaining` is the vendor's own number, not `limit - used`: `extract_block`
-    // keeps both when the wire reports both. Dropping it would lose the figure a
-    // request-counting quota is actually read for.
-    let weekly_detail = format!(
-        "{used} / {limit} · {remaining} left",
-        used = snap.weekly_used,
-        limit = snap.weekly_limit,
-        remaining = snap.weekly_remaining
-    );
-    push_window_with_row(
-        &mut lines,
-        "  󰅄  Weekly quota",
-        &window(weekly_pct, snap.weekly_reset_at, WEEKLY_WINDOW),
-        theme,
-        now,
-        WindowRow::default().with_detail(&weekly_detail),
-    );
-
+    // Kimi reports each quota as used/limit against a limit of 100, so the
+    // pair is the percentage in longhand: project it onto a window and the
+    // bar carries it, like every other vendor's.
     if snap.window_limit > 0 {
         lines.push(TooltipLine::Body("".into()));
-        let window_detail = format!(
-            "{used} / {limit} · {remaining} left",
-            used = snap.window_used,
-            limit = snap.window_limit,
-            remaining = snap.window_remaining
-        );
         push_window_with_row(
             &mut lines,
             "  󰅁  Rolling window (5h)",
             &window(snap.window_pct(), snap.window_reset_at, ROLLING_WINDOW),
             theme,
             now,
-            WindowRow::default().with_detail(&window_detail),
+            WindowRow::default(),
         );
     }
+
+    lines.push(TooltipLine::Body("".into()));
+    push_window_with_row(
+        &mut lines,
+        "  󰅄  Weekly quota",
+        &window(weekly_pct, snap.weekly_reset_at, WEEKLY_WINDOW),
+        theme,
+        now,
+        WindowRow::default(),
+    );
 
     if let Some((code, msg)) = outcome.last_error.as_ref() {
         let (label, icon, ecolor) = match warning_kind(*code, msg) {
@@ -253,12 +239,7 @@ fn render_tooltip(
 
 impl From<FetchOutcome> for VendorOutcome {
     fn from(o: FetchOutcome) -> Self {
-        Self {
-            snapshot: crate::usage::VendorSnapshot::Kimi(o.snapshot),
-            stale: o.stale,
-            last_error: o.last_error,
-            cache_age: o.cache_age,
-        }
+        o.map(crate::usage::VendorSnapshot::Kimi)
     }
 }
 
@@ -306,18 +287,14 @@ mod tests {
     }
 
     #[test]
-    fn default_render_has_exactly_one_percent() {
+    fn default_render_has_one_percent_for_each_quota() {
         let snap = sample_snap();
         let outcome = sample_outcome(snap.clone());
         let out = render(&outcome, &snap, &Theme::default(), &opts(), now());
-        // "26%" should appear exactly once and there must be no double percent.
+        assert!(out.text.contains("15%"), "text: {}", out.text);
         assert!(out.text.contains("26%"), "text: {}", out.text);
-        assert!(
-            !out.text.contains("%%"),
-            "double percent in text: {}",
-            out.text
-        );
-        assert_eq!(out.text.matches('%').count(), 1, "text: {}", out.text);
+        assert!(!out.text.contains("%%"), "text: {}", out.text);
+        assert_eq!(out.text.matches('%').count(), 2, "text: {}", out.text);
     }
 
     #[test]
@@ -463,9 +440,9 @@ mod tests {
         assert!(out.tooltip.contains("Kimi"));
         assert!(out.tooltip.contains("LEVEL_INTERMEDIATE"));
         assert!(out.tooltip.contains("Weekly quota"));
-        assert!(out.tooltip.contains("26 / 100"));
         assert!(out.tooltip.contains("Rolling window"));
-        assert!(out.tooltip.contains("15 / 100"));
+        assert!(out.tooltip.contains("26%"));
+        assert!(out.tooltip.contains("15%"));
         // Reset should be a countdown, not raw RFC3339.
         assert!(!out.tooltip.contains("2026-02-11T17:32:50"));
         assert!(!out.tooltip.contains("2026-02-07T12:32:50"));
@@ -520,39 +497,23 @@ mod tests {
         assert!(out.tooltip.contains("Resets in"), "{}", out.tooltip);
     }
 
-    /// The counters the old hand-rolled rows carried ride the reset line now —
-    /// the bar replaces the `26 / 100  (26%)` pair, it does not drop it.
+    /// Kimi reports each quota as used/limit against a limit of 100, so the
+    /// counters are the percentage in longhand — the bar above already shows
+    /// it. The reset line carries the countdown alone, like every other
+    /// vendor's row.
     #[test]
-    fn tooltip_keeps_the_raw_counts_on_the_reset_line() {
+    fn tooltip_reset_line_carries_the_countdown_alone() {
         let snap = sample_snap();
         let outcome = sample_outcome(snap.clone());
         let out = render(&outcome, &snap, &Theme::default(), &opts(), now());
-        assert!(out.tooltip.contains("· 26 / 100"), "{}", out.tooltip);
-        assert!(out.tooltip.contains("· 15 / 100"), "{}", out.tooltip);
-    }
-
-    /// `remaining` is what a request-counting quota is read for, and it is the
-    /// vendor's own figure rather than `limit - used` — `extract_block` keeps
-    /// both when the wire reports both, so it cannot be recovered by
-    /// subtraction. The fixture makes them disagree to prove which one is
-    /// rendered.
-    #[test]
-    fn tooltip_keeps_the_vendors_own_remaining_count() {
-        let mut snap = sample_snap();
-        snap.weekly_remaining = 70; // not 100 - 26
-        snap.window_remaining = 80; // not 100 - 15
-        let outcome = sample_outcome(snap.clone());
-        let out = render(&outcome, &snap, &Theme::default(), &opts(), now());
-        assert!(
-            out.tooltip.contains("· 26 / 100 · 70 left"),
-            "{}",
-            out.tooltip
-        );
-        assert!(
-            out.tooltip.contains("· 15 / 100 · 80 left"),
-            "{}",
-            out.tooltip
-        );
+        for line in out.tooltip.lines().filter(|l| l.contains("Resets in")) {
+            assert_eq!(
+                line.matches('·').count(),
+                0,
+                "reset line carries more than the countdown: {line}"
+            );
+        }
+        assert!(!out.tooltip.contains("100"), "{}", out.tooltip);
     }
 
     /// Kimi opts out of pacing, like Codex; the rows must not sprout a glyph
@@ -567,13 +528,32 @@ mod tests {
         }
     }
 
-    /// `{pct}% · {reset}` is what every other percentage vendor puts on the
-    /// bar; Kimi printed a bare `26%`.
+    /// The tooltip runs shortest window first, the way Claude's and Codex's
+    /// both open on their 5h row. Kimi's rolling bucket is that window, so it
+    /// sits above the weekly quota — the same order `DEFAULT_FORMAT` and the
+    /// detail panel use.
     #[test]
-    fn default_bar_text_pairs_the_percentage_with_its_reset() {
+    fn tooltip_puts_the_rolling_window_above_the_weekly_quota() {
         let snap = sample_snap();
         let outcome = sample_outcome(snap.clone());
         let out = render(&outcome, &snap, &Theme::default(), &opts(), now());
-        assert!(out.text.contains("26% · 4d 0h"), "{}", out.text);
+        let rolling = out
+            .tooltip
+            .find("Rolling window (5h)")
+            .unwrap_or_else(|| panic!("no rolling row: {}", out.tooltip));
+        let weekly = out
+            .tooltip
+            .find("Weekly quota")
+            .unwrap_or_else(|| panic!("no weekly row: {}", out.tooltip));
+        assert!(rolling < weekly, "{}", out.tooltip);
+    }
+
+    /// Kimi's compact surface must not discard either independent quota.
+    #[test]
+    fn default_bar_text_shows_the_rolling_and_weekly_quotas() {
+        let snap = sample_snap();
+        let outcome = sample_outcome(snap.clone());
+        let out = render(&outcome, &snap, &Theme::default(), &opts(), now());
+        assert!(out.text.contains("5h 15% · 7d 26%"), "{}", out.text);
     }
 }
