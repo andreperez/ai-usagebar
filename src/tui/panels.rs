@@ -303,6 +303,13 @@ pub fn compact_cells(snapshot: &VendorSnapshot) -> (String, Vec<(String, PaceSev
             .collect();
             (s.plan.clone(), cells)
         }
+        VendorSnapshot::Together(s) => (
+            s.billing_period.clone(),
+            vec![(
+                format!("spent {}", money(s.monthly_spend, &s.currency)),
+                PaceSeverity::Low,
+            )],
+        ),
         VendorSnapshot::Custom(s) => (
             s.plan.clone().unwrap_or_default(),
             s.metrics
@@ -393,6 +400,7 @@ pub fn headline_pct(snapshot: &VendorSnapshot) -> Option<i32> {
         .into_iter()
         .flatten()
         .max(),
+        VendorSnapshot::Together(_) => None,
         VendorSnapshot::Custom(s) => s.metrics.first().map(|metric| i32::from(metric.pct)),
         VendorSnapshot::Openrouter(_)
         | VendorSnapshot::Deepseek(_)
@@ -474,6 +482,7 @@ pub(crate) fn sections_with_metadata_for(
                 VendorSnapshot::OpenCodeGo(s) => opencode_go_sections(s, now, pace_tolerance),
                 VendorSnapshot::CommandCode(s) => commandcode_sections(s, now),
                 VendorSnapshot::Ollama(s) => ollama_sections(s, now, pace_tolerance),
+                VendorSnapshot::Together(s) => together_sections(s),
                 VendorSnapshot::Custom(s) => custom_sections(s),
             };
             // Inject the (already-absolute) fetched-at instant into the title
@@ -1399,6 +1408,41 @@ fn ollama_sections(
         });
     }
     v
+}
+
+fn together_sections(s: &crate::usage::TogetherSnapshot) -> SectionBuilder {
+    let mut sections = SectionBuilder::new(vec![Section::Title {
+        left: "Together AI".into(),
+        right: None,
+    }]);
+    sections.push(Section::Spacer);
+    sections.push(Section::Text {
+        label: "Monthly spend".into(),
+        value: money(s.monthly_spend, &s.currency),
+    });
+    sections.push(Section::Text {
+        label: "Billing period".into(),
+        value: s.billing_period.clone(),
+    });
+    if let Some(end) = s.latest_window_end {
+        sections.push(Section::Text {
+            label: "Finalized through".into(),
+            value: end.format("%Y-%m-%d %H:%M UTC").to_string(),
+        });
+    }
+    if !s.products.is_empty() {
+        sections.push(Section::Spacer);
+        sections.push(Section::Block {
+            label: "Products".into(),
+            body: s
+                .products
+                .iter()
+                .take(5)
+                .map(|product| format!("{}: {}", product.name, money(product.cost, &s.currency)))
+                .collect(),
+        });
+    }
+    sections
 }
 
 fn push_top_models(

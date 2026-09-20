@@ -1,6 +1,6 @@
 # ai-usagebar
 
-Native Omarchy Quattro panel, Waybar widget, and tabbed TUI for AI plan usage across **Claude**, **Codex/ChatGPT**, **GitHub Copilot**, **Z.AI (GLM)**, **OpenRouter**, **DeepSeek**, **Kimi**, **Nous Research**, **OpenCode Go**, **Command Code**, and other supported AI coding services.
+Native Omarchy Quattro panel, Waybar widget, and tabbed TUI for AI plan usage across **Claude**, **Codex/ChatGPT**, **GitHub Copilot**, **Z.AI (GLM)**, **OpenRouter**, **DeepSeek**, **Kimi**, **Together AI**, **Nous Research**, **OpenCode Go**, **Command Code**, and other supported AI coding services.
 
 ai-usagebar began as a Rust port of
 [`claudebar`](https://github.com/mryll/claudebar) and remains drop-in
@@ -43,6 +43,7 @@ codebase.
 - [Development guide](DEVELOPMENT.md)
 - [Windows build guide](docs/windows-build.md)
 - [Ollama Cloud integration](docs/ollama-setup.md)
+- [Together AI integration](docs/together-setup.md)
 - [Claude accounts](docs/claude-accounts.md)
 - [Format placeholders](docs/format-placeholders.md)
 - [Provider endpoints and live tests](docs/vendor-endpoints.md)
@@ -263,6 +264,7 @@ come from environment variables or `config.toml`.
 | Z.AI | API key (`ZAI_API_KEY` env or `[zai] api_key` in config) | Set either. |
 | OpenRouter | API key (`OPENROUTER_API_KEY` env or `[openrouter] api_key` in config) | Set either. Named keys are supported. |
 | DeepSeek | API key (`DEEPSEEK_API_KEY` or config) | Set either and opt in. |
+| Together AI | API key (`TOGETHER_API_KEY` or config) | Set either and opt in. The organization must have beta billing API access. |
 | Kimi | Existing Kimi Code CLI login **or** API key (`KIMI_API_KEY` or config) | Opt in, then either log in with `kimi` (nothing to paste) or set an API key, which wins when present. A Kimi For Coding subscription can issue one at kimi.com/code/console. |
 | Kilo | API key (`KILO_API_KEY` env or `[kilo] api_key` in config) | Set either. Opt-in. For a team balance, also set `[kilo] organization_id`; omit it for the personal balance. |
 | Novita | API key (`NOVITA_API_KEY` env or `[novita] api_key` in config) | Set either. Opt-in. |
@@ -346,7 +348,7 @@ rather than silently querying the wrong URL.
 
 `enabled = true` is what makes a vendor fetch. Anthropic API, GitHub Copilot,
 DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok, SuperGrok, Grok Bot, Antigravity,
-Cursor, MiniMax, and Kiro CLI all default to **disabled** so that existing
+Cursor, MiniMax, Kiro CLI, Ollama Cloud, and Together AI all default to **disabled** so that existing
 installs are unaffected until you opt in. Use either method:
 
 - Use the gear or `s` in the Omarchy panel, or run
@@ -874,6 +876,9 @@ Run `make smoke` to check live response shapes.
 
 For Ollama Cloud setup (Bearer key from ollama.com/settings/keys), see the
 [Ollama integration guide](docs/ollama-setup.md).
+
+For Together AI organization billing setup, see the
+[Together AI integration guide](docs/together-setup.md).
 
 ## Format placeholders
 

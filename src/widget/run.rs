@@ -31,6 +31,7 @@ use crate::openrouter;
 use crate::pango::escape;
 use crate::supergrok;
 use crate::theme::Theme;
+use crate::together;
 use crate::vendor::{HTTP_CLIENT_TIMEOUT, RenderOpts, VendorOutcome};
 use crate::waybar::WaybarOutput;
 use crate::widget::cli::{Cli, Vendor};
@@ -167,6 +168,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         Vendor::OpenCodeGo => opencode_go_output(cli, &config).await,
         Vendor::CommandCode => commandcode_output(cli, &config).await,
         Vendor::Ollama => ollama_output(cli, &config).await,
+        Vendor::Together => together_output(cli, &config).await,
     }
 }
 
@@ -319,6 +321,34 @@ async fn ollama_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
     let snapshot = outcome.snapshot.clone();
     let vendor_outcome: VendorOutcome = outcome.into();
     Ok(ollama::vendor::render(
+        &vendor_outcome,
+        &snapshot,
+        &theme_from_cli(cli),
+        &RenderOpts::from_cli(cli),
+        Utc::now(),
+    ))
+}
+
+async fn together_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
+    let api_key = crate::config::resolve_api_key(
+        "Together AI",
+        &config.together.api_key_env,
+        config.together.api_key.as_deref(),
+    )?;
+    let client = http_client()?;
+    let cache = vendor_cache(cli, "together")?;
+    let endpoints = together::fetch::Endpoints::default();
+    let outcome =
+        match together::fetch_snapshot(&client, &api_key, &cache, &endpoints, DEFAULT_TTL).await {
+            Ok(outcome) => outcome,
+            Err(error) if error.is_transient() => {
+                return Ok(WaybarOutput::loading(cli.icon.as_deref()));
+            }
+            Err(error) => return Err(error),
+        };
+    let snapshot = outcome.snapshot.clone();
+    let vendor_outcome: VendorOutcome = outcome.into();
+    Ok(together::vendor::render(
         &vendor_outcome,
         &snapshot,
         &theme_from_cli(cli),

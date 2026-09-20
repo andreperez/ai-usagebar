@@ -10,7 +10,7 @@
 # is selected when the TUI opens. Comment out to default to Anthropic.
 # Valid: anthropic | anthropic_api | openai | copilot | zai | openrouter | deepseek
 #        | kimi | kilo | novita | moonshot | grok | supergrok | grokbot | antigravity
-#        | cursor | minimax | kiro | nous | opencode-go | commandcode | ollama
+#        | cursor | minimax | kiro | nous | opencode-go | commandcode | ollama | together
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
@@ -214,6 +214,16 @@ enabled = false
 api_key_env = "OLLAMA_API_KEY"  # checked first; if set + non-empty, used
 # api_key = "..."               # fallback; chmod 600 the file if you use it
 # plan = "pro"                  # label shown in tooltips; the API reports none
+
+[together]
+# Disabled by default. Reports finalized organization spend for the current
+# month from Together AI's documented beta billing endpoint. The endpoint must
+# be enabled for your organization (request access through Together support);
+# otherwise Together returns HTTP 404.
+# Credit balance is not part of the public API and is therefore not inferred.
+enabled = false
+api_key_env = "TOGETHER_API_KEY"  # any variable name; rename to reuse an existing one
+# api_key = "..."                 # fallback; chmod 600 the file if you use it
 
 [kimi]
 # Disabled by default. Two ways to authenticate:

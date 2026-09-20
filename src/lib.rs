@@ -55,6 +55,7 @@ pub mod safe_storage;
 pub mod serde_helpers;
 pub mod supergrok;
 pub mod theme;
+pub mod together;
 pub mod tooltip;
 pub mod tray;
 pub mod tui;

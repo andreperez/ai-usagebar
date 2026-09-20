@@ -80,6 +80,7 @@ use ai_usagebar::ollama;
 use ai_usagebar::openai;
 use ai_usagebar::openrouter;
 use ai_usagebar::supergrok;
+use ai_usagebar::together;
 use ai_usagebar::zai;
 
 fn xdg_cache_for(test: &str) -> Cache {
@@ -825,5 +826,37 @@ async fn ollama_live() {
         snap.weekly.as_ref().map(|w| w.utilization_pct),
         snap.session_models.len(),
         snap.weekly_models.len(),
+    );
+}
+
+#[tokio::test]
+#[ignore = "live API"]
+async fn together_live() {
+    let Ok(api_key) = std::env::var("TOGETHER_API_KEY") else {
+        eprintln!("TOGETHER_API_KEY not set — skipping together_live");
+        return;
+    };
+
+    let cache = xdg_cache_for("together");
+    let outcome = together::fetch_snapshot(
+        &reqwest::Client::new(),
+        &api_key,
+        &cache,
+        &together::fetch::Endpoints::default(),
+        Duration::ZERO,
+    )
+    .await
+    .expect("Together AI billing fetch should succeed against the real API");
+
+    let snapshot = outcome.snapshot;
+    assert!(!snapshot.organization_id.is_empty());
+    assert_eq!(snapshot.currency, "USD");
+    assert!(snapshot.monthly_spend.is_finite());
+    println!(
+        "Together AI — period={}, spend={:.2} {}, products={}",
+        snapshot.billing_period,
+        snapshot.monthly_spend,
+        snapshot.currency,
+        snapshot.products.len()
     );
 }

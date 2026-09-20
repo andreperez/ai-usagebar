@@ -20,7 +20,7 @@ ai-usagebar-tui --config ./config.test.toml
 # Which vendor the widget shows when --vendor is omitted, AND which tab
 # is selected when the TUI opens. Defaults to anthropic when not set.
 # Only a vendor that is enabled can be primary.
-# primary = "anthropic"   # anthropic | anthropic_api | openai | copilot | ollama
+# primary = "anthropic"   # anthropic | anthropic_api | openai | copilot | ollama | together
 #                         # | zai | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | grokbot | antigravity | cursor
 #                         # | minimax | kiro | nous | opencode-go | commandcode
@@ -109,6 +109,13 @@ api_key_env = "NOVITA_API_KEY"
 enabled = true
 api_key_env = "OLLAMA_API_KEY"
 # api_key = "..."          # used if OLLAMA_API_KEY is unset; chmod 600 the file!
+
+[together]
+# Disabled by default. Reports finalized organization spend for the current
+# month. Together must enable the beta billing endpoint for your organization.
+enabled = true
+api_key_env = "TOGETHER_API_KEY"
+# api_key = "..."          # used if TOGETHER_API_KEY is unset; chmod 600 the file!
 
 [moonshot]
 enabled = true             # disabled by default; enable once you add an API key

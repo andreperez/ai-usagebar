@@ -9,6 +9,15 @@ Each release is also published at
 
 ## [Unreleased]
 
+### Added
+
+- **Together AI organization billing.** The native `together` provider reads
+  the documented beta `GET /v1/billing/usage` endpoint with
+  `TOGETHER_API_KEY`, aggregates paginated daily line items into current-month
+  spend and per-product costs, and exposes the result in the widget, TUI, and
+  `usage --json`. The provider is disabled by default. Together's dashboard
+  credit balance is not part of the public response and is not inferred.
+
 ## [1.20.2] — 2026-09-19
 
 ### Fixed

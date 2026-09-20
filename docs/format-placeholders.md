@@ -19,7 +19,7 @@ metrics expand to an empty string unless noted otherwise.
 | Cursor | `cur` | MiniMax | `mmx` |
 | Kiro CLI | `kir` | Nous Research | `nrs` |
 | OpenCode Go | `ocg` | Command Code | `cmc` |
-| Ollama Cloud | `oll` | | |
+| Ollama Cloud | `oll` | Together AI | `tgt` |
 
 The same codes ride the `ai-usagebar usage --json` report as each entry's
 `short_name`, so a native frontend can draw a Waybar-style provider tag without
@@ -343,3 +343,12 @@ the reset/pace families render neutral values when the window projection
 is unavailable. `{oll_cost}` is the dollar figure the settings page reports
 for the last four weeks of activity. `{session_pct}` and `{weekly_pct}`
 alias the session and weekly windows.
+
+## Together AI
+
+`{together_spend}`, `{together_period}`, `{currency}`
+
+Together AI reports finalized organization spend for the current billing
+month. It has no public credit-balance field and no percentage limit, so the
+cross-provider session and weekly placeholders remain neutral. The default
+format is `{together_spend}`.

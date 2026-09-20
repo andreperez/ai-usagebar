@@ -121,6 +121,7 @@ Live smoke tests need credentials in the environment (`OLLAMA_API_KEY`,
 ```bash
 # One live vendor
 OLLAMA_API_KEY=… cargo test --test live ollama_live -- --ignored --nocapture
+TOGETHER_API_KEY=… cargo test --test live together_live -- --ignored --nocapture
 ```
 
 ## Lint and format
@@ -177,6 +178,10 @@ CLI key in `~/.ollama/id_ed25519` is a registry credential and is refused by
 `/api/usage` with 401.
 
 Full walkthrough: [docs/ollama-setup.md](docs/ollama-setup.md).
+
+Together AI organization billing is also a native provider. See
+[docs/together-setup.md](docs/together-setup.md); the beta endpoint must be
+enabled for the organization.
 
 ## Windows
 

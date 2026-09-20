@@ -882,6 +882,19 @@ async fn build_outcome(client: &Client, config: &Config, tab: &TabId) -> Result<
             .await?;
             Ok(outcome.into())
         }
+        VendorId::Together => {
+            let api_key = crate::config::resolve_api_key(
+                "Together AI",
+                &config.together.api_key_env,
+                config.together.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("together")?;
+            let endpoints = crate::together::fetch::Endpoints::default();
+            let outcome =
+                crate::together::fetch_snapshot(client, &api_key, &cache, &endpoints, DEFAULT_TTL)
+                    .await?;
+            Ok(outcome.map(crate::usage::VendorSnapshot::Together))
+        }
     }
 }
 

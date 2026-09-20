@@ -65,6 +65,7 @@ pub struct Config {
     pub opencode_go: OpenCodeGoConfig,
     pub commandcode: CommandCodeConfig,
     pub ollama: OllamaConfig,
+    pub together: TogetherConfig,
     /// User-defined providers, one `[[custom]]` table each.
     pub custom: Vec<CustomProviderConfig>,
 }
@@ -842,6 +843,26 @@ impl Default for OllamaConfig {
             api_key_env: "OLLAMA_API_KEY".to_string(),
             api_key: None,
             plan: "pro".to_string(),
+        }
+    }
+}
+
+/// Together AI organization billing usage. The documented endpoint is beta
+/// and organization-scoped, so the provider is opt-in.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TogetherConfig {
+    pub enabled: bool,
+    pub api_key_env: String,
+    pub api_key: Option<String>,
+}
+
+impl Default for TogetherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "TOGETHER_API_KEY".to_string(),
+            api_key: None,
         }
     }
 }
@@ -1732,6 +1753,7 @@ impl Config {
             self.grok.api_key.as_deref(),
             self.anthropic_api.api_key.as_deref(),
             self.opencode_go.api_key.as_deref(),
+            self.together.api_key.as_deref(),
             self.antigravity.oauth_client_secret.as_deref(),
         ]
         .into_iter()
@@ -1810,6 +1832,7 @@ impl Config {
             VendorId::OpenCodeGo => self.opencode_go.enabled,
             VendorId::CommandCode => self.commandcode.enabled,
             VendorId::Ollama => self.ollama.enabled,
+            VendorId::Together => self.together.enabled,
         }
     }
 
@@ -1833,6 +1856,7 @@ impl Config {
             VendorId::Minimax => &self.minimax.api_key_env,
             VendorId::OpenCodeGo => &self.opencode_go.api_key_env,
             VendorId::Ollama => &self.ollama.api_key_env,
+            VendorId::Together => &self.together.api_key_env,
             // Fixed names: OAuth-first providers whose environment override is
             // not user-renameable, and the providers with no key at all.
             VendorId::Anthropic
@@ -1865,6 +1889,7 @@ impl Config {
             VendorId::Minimax => self.minimax.api_key.as_deref(),
             VendorId::OpenCodeGo => self.opencode_go.api_key.as_deref(),
             VendorId::Ollama => self.ollama.api_key.as_deref(),
+            VendorId::Together => self.together.api_key.as_deref(),
             VendorId::Anthropic
             | VendorId::Openai
             | VendorId::Copilot

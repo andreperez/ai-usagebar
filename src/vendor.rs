@@ -43,6 +43,7 @@ pub(crate) const VENDOR_SECRET_ENV_VARS: &[&str] = &[
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "OLLAMA_API_KEY",
+    "TOGETHER_API_KEY",
 ];
 
 /// Env var names a `[[custom]]` provider reads its token from. They are not
@@ -178,6 +179,7 @@ pub enum VendorId {
     #[serde(rename = "commandcode")]
     CommandCode,
     Ollama,
+    Together,
 }
 
 /// How a provider authenticates. Drives what a frontend offers a provider that
@@ -230,6 +232,7 @@ impl VendorId {
             VendorId::OpenCodeGo => "opencode-go",
             VendorId::CommandCode => "commandcode",
             VendorId::Ollama => "ollama",
+            VendorId::Together => "together",
         }
     }
 
@@ -260,6 +263,7 @@ impl VendorId {
             VendorId::OpenCodeGo => "OpenCode Go",
             VendorId::CommandCode => "Command Code",
             VendorId::Ollama => "Ollama Cloud",
+            VendorId::Together => "Together AI",
         }
     }
 
@@ -291,6 +295,7 @@ impl VendorId {
             // No distinct Nerd Font mark for Ollama Cloud; the `oll` short
             // name is unique by construction and cannot render as tofu.
             VendorId::Ollama => VendorId::Ollama.short_name(),
+            VendorId::Together => VendorId::Together.short_name(),
         }
     }
 
@@ -322,6 +327,7 @@ impl VendorId {
             VendorId::OpenCodeGo => "ocg",
             VendorId::CommandCode => "cmc",
             VendorId::Ollama => "oll",
+            VendorId::Together => "tgt",
         }
     }
 
@@ -356,6 +362,7 @@ impl VendorId {
             VendorId::OpenCodeGo => "opencode-go",
             VendorId::CommandCode => "commandcode",
             VendorId::Ollama => "ollama",
+            VendorId::Together => "together",
         }
     }
 
@@ -382,7 +389,8 @@ impl VendorId {
             | VendorId::Grok
             | VendorId::Minimax
             | VendorId::OpenCodeGo
-            | VendorId::Ollama => AuthKind::ApiKey,
+            | VendorId::Ollama
+            | VendorId::Together => AuthKind::ApiKey,
             // No credential of their own: another local product's session is
             // the login. Antigravity has no credential file at all (the binary
             // probes whichever local server answers), Cursor and Kiro read the
@@ -415,6 +423,7 @@ impl VendorId {
             VendorId::Minimax => "MINIMAX_API_KEY",
             VendorId::OpenCodeGo => "OPENCODE_GO_API_KEY",
             VendorId::Ollama => "OLLAMA_API_KEY",
+            VendorId::Together => "TOGETHER_API_KEY",
             // OAuth-first, with an environment override for CI and headless
             // use. Neither name is configurable, so neither has an
             // `api_key_env` field in its config section.
@@ -471,7 +480,8 @@ impl VendorId {
             | VendorId::Moonshot
             | VendorId::Minimax
             | VendorId::OpenCodeGo
-            | VendorId::Ollama => "Add an API key in Settings, then Refresh.",
+            | VendorId::Ollama
+            | VendorId::Together => "Add an API key in Settings, then Refresh.",
         }
     }
 
@@ -500,7 +510,8 @@ impl VendorId {
             | VendorId::Cursor
             | VendorId::Minimax
             | VendorId::OpenCodeGo
-            | VendorId::Ollama => "",
+            | VendorId::Ollama
+            | VendorId::Together => "",
         }
     }
 
@@ -528,6 +539,7 @@ impl VendorId {
             VendorId::OpenCodeGo,
             VendorId::CommandCode,
             VendorId::Ollama,
+            VendorId::Together,
         ]
     }
 }
@@ -660,6 +672,7 @@ mod tests {
             "XAI_MANAGEMENT_KEY",
             "ANTHROPIC_ADMIN_KEY",
             "GITHUB_COPILOT_TOKEN",
+            "TOGETHER_API_KEY",
         ];
         for name in configured_defaults {
             assert!(VENDOR_SECRET_ENV_VARS.contains(&name), "missing {name}");

@@ -404,11 +404,37 @@ pub enum VendorSnapshot {
     OpenCodeGo(crate::opencode_go::types::Usage),
     CommandCode(crate::commandcode::types::Snapshot),
     Ollama(OllamaSnapshot),
+    Together(TogetherSnapshot),
     /// A `[[custom]]` provider. Which one is not in the snapshot: the caller
     /// that fetched it holds the `CustomProviderConfig`, and the cache
     /// directory is keyed by its `id`.
     Custom(crate::custom::types::CustomSnapshot),
 }
+
+/// Together AI organization billing for the current month.
+///
+/// The public billing API reports finalized cost line items but does not expose
+/// the prepaid credit balance shown by the web dashboard.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TogetherSnapshot {
+    pub organization_id: String,
+    pub billing_period: String,
+    pub currency: String,
+    pub monthly_spend: f64,
+    pub products: Vec<TogetherProductCost>,
+    pub earliest_window_start: Option<DateTime<Utc>>,
+    pub latest_window_end: Option<DateTime<Utc>>,
+}
+
+impl Eq for TogetherSnapshot {}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TogetherProductCost {
+    pub name: String,
+    pub cost: f64,
+}
+
+impl Eq for TogetherProductCost {}
 
 /// Google Antigravity 2.0 / CLI snapshot. The API groups models into Gemini
 /// and third-party (Claude/GPT) buckets, and each group may carry a 5-hour and
