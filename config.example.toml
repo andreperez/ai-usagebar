@@ -14,8 +14,14 @@
 # When unset, the TUI opens on the Overview (all vendors at once); set this to
 # open directly on a vendor's tab instead.
 # primary = "anthropic"
+# Explicit provider scope for automatic fetches: TUI tabs/Overview,
+# `usage --json`, and widget cycling/default resolution. Omit to fetch every
+# enabled provider. Set to [] to disable automatic fetches while keeping
+# explicit `--vendor` one-off checks. Managed in the TUI Settings overlay
+# (Dashboard providers checkboxes); saving a new API key auto-selects it.
+# active_vendors = ["anthropic", "openai", "zai", "openrouter"]
 # Which vendors the Overview lists (the TUI's first tab / the macOS menu-bar's
-# top section), in this order. Omit for every enabled vendor.
+# top section), in this order. Omit for every active vendor.
 # overview_vendors = ["anthropic", "cursor", "openai"]
 # Presentation of vendor tab navigation: sidebar (vertical box) | navbar (top strip) | none (hidden).
 # Default sidebar (falls back to navbar on narrow terminals).

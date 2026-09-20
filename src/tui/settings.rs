@@ -28,9 +28,7 @@ use ratatui_bubbletea_theme::BubbleTheme;
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, value};
 
-use crate::config::{
-    Config, is_valid_env_var_name, read_config_document, set_bool, write_config_document,
-};
+use crate::config::{Config, read_config_document, set_bool, write_config_document};
 use crate::error::{AppError, Result};
 use crate::theme::Theme;
 use crate::tui::style::bubble_theme;
@@ -150,10 +148,12 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
     },
 ];
 
-/// Which control has keyboard focus. `Key(i)` indexes into [`KEY_VENDORS`].
+/// Which control has keyboard focus. `Active(i)` indexes active provider
+/// candidates; `Key(i)` indexes into [`KEY_VENDORS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Primary,
+    Active(usize),
     Key(usize),
     Save,
 }
@@ -162,6 +162,7 @@ impl Focus {
     pub fn next(self) -> Self {
         match self {
             Focus::Primary => Focus::Key(0),
+            Focus::Active(_) => Focus::Key(0),
             Focus::Key(i) if i + 1 < KEY_VENDORS.len() => Focus::Key(i + 1),
             Focus::Key(_) => Focus::Save,
             Focus::Save => Focus::Primary,
@@ -170,6 +171,7 @@ impl Focus {
     pub fn prev(self) -> Self {
         match self {
             Focus::Primary => Focus::Save,
+            Focus::Active(_) => Focus::Primary,
             Focus::Key(0) => Focus::Primary,
             Focus::Key(i) => Focus::Key(i - 1),
             Focus::Save => Focus::Key(KEY_VENDORS.len() - 1),
@@ -275,10 +277,14 @@ impl KeyInput {
 #[derive(Debug, Clone)]
 pub struct SettingsState {
     pub focus: Focus,
-    /// Enabled vendors only. The primary selector must not offer a value that
-    /// cannot actually be used by the widget or TUI.
+    /// Active providers only. The primary selector cannot offer a provider
+    /// outside the automatic fetch/display scope.
     pub primary_choices: Vec<VendorId>,
     pub primary: VendorId,
+    /// Enabled providers eligible for automatic refresh/display.
+    pub active_choices: Vec<VendorId>,
+    /// Explicit selected subset, stored as `[ui] active_vendors` on save.
+    pub active_vendors: Vec<VendorId>,
     /// One input per [`KEY_VENDORS`] entry, same order.
     pub keys: Vec<KeyInput>,
     /// One-line status displayed in the footer ("saved …", "save failed …").
@@ -287,50 +293,31 @@ pub struct SettingsState {
 
 impl SettingsState {
     pub fn from_config(cfg: &Config) -> Self {
-        Self::from_config_with(cfg, |name| {
-            std::env::var_os(name).is_some_and(|v| !v.is_empty())
-        })
+        Self::from_config_with(cfg, |_name| false)
     }
 
     /// [`Self::from_config`] with an injected environment lookup.
     ///
-    /// The overlay offers a key-only vendor whose env var is already exported,
-    /// so a user need not hand-edit `config.toml` to select it. That is a read
-    /// of ambient state, which a test must never depend on: the AUR `check()`
-    /// runs `cargo test` during `makepkg`, so a test that branched on the real
-    /// environment would fail the install for anyone who exports, say,
-    /// `OLLAMA_API_KEY`. Tests pass their own lookup here.
-    pub fn from_config_with(cfg: &Config, env_set: impl Fn(&str) -> bool) -> Self {
+    /// The `_env_set` hook is retained for API compatibility with callers that
+    /// inject ambient state in tests; the active scope itself is derived from
+    /// enabled providers so automatic fetches never waste network on disabled
+    /// providers.
+    pub fn from_config_with(cfg: &Config, _env_set: impl Fn(&str) -> bool) -> Self {
         let keys = KEY_VENDORS
             .iter()
             .map(|kv| KeyInput::from_config(cfg.inline_api_key(kv.id)))
             .collect();
-        let mut primary_choices = cfg.enabled_vendors();
+        let active_choices: Vec<VendorId> = cfg.enabled_vendors();
+        let active_vendors = cfg.active_vendors();
+        let mut primary_choices = active_vendors.clone();
         // Copilot credentials belong to GitHub CLI, so a login cannot write a
         // local key that would also opt it in. Offer it explicitly instead:
         // selecting it persists both the primary and `enabled = true`.
         if !primary_choices.contains(&VendorId::Copilot) {
             primary_choices.push(VendorId::Copilot);
         }
-        // Key-only vendors are opt-in: without an inline `api_key` and with
-        // the env var empty, the fetch would fail on the first cycle. A user
-        // who already exported the env var (e.g. `OLLAMA_API_KEY`) and wants
-        // to flip `enabled = true` from inside the TUI has to be able to
-        // select the vendor here — otherwise they'd have to hand-edit
-        // `config.toml`, which is the workflow this overlay exists to avoid.
-        // We treat a non-empty env var as a sufficient signal of reachability.
-        for kv in KEY_VENDORS {
-            if primary_choices.contains(&kv.id) {
-                continue;
-            }
-            let env = cfg.api_key_env_for(kv.id);
-            let exported = is_valid_env_var_name(env) && env_set(env);
-            if cfg.inline_api_key(kv.id).is_some() || exported {
-                primary_choices.push(kv.id);
-            }
-        }
-        // A configured but disabled primary is ineffective. Display the first
-        // enabled vendor instead; when none are enabled retain the historical
+        // A primary outside the active scope is ineffective. Display the first
+        // active provider instead; when none are active retain the historical
         // Anthropic fallback in memory without inventing a persisted primary.
         let primary = cfg
             .ui
@@ -345,8 +332,87 @@ impl SettingsState {
             focus: Focus::Primary,
             primary_choices,
             primary,
+            active_choices,
+            active_vendors,
             keys,
             status: String::new(),
+        }
+    }
+
+    /// Whether an active-provider checkbox is selected.
+    pub fn is_active(&self, index: usize) -> bool {
+        self.active_choices
+            .get(index)
+            .is_some_and(|vendor| self.active_vendors.contains(vendor))
+    }
+
+    /// Toggle a provider in the automatic fetch/display scope.
+    /// Selection order always follows `active_choices`, not toggle order, so
+    /// every frontend receives stable canonical ordering.
+    pub fn toggle_active(&mut self, index: usize) {
+        let Some(vendor) = self.active_choices.get(index).copied() else {
+            return;
+        };
+        if let Some(position) = self.active_vendors.iter().position(|id| *id == vendor) {
+            self.active_vendors.remove(position);
+        } else {
+            self.active_vendors.push(vendor);
+        }
+        self.active_vendors = self
+            .active_choices
+            .iter()
+            .copied()
+            .filter(|id| self.active_vendors.contains(id))
+            .collect();
+        self.primary_choices = self.active_vendors.clone();
+        if !self.primary_choices.contains(&VendorId::Copilot) {
+            self.primary_choices.push(VendorId::Copilot);
+        }
+        if !self.primary_choices.contains(&self.primary) {
+            self.primary = self
+                .primary_choices
+                .first()
+                .copied()
+                .unwrap_or(VendorId::Anthropic);
+        }
+    }
+
+    fn next_focus(&self) -> Focus {
+        match self.focus {
+            Focus::Primary => {
+                if self.active_choices.is_empty() {
+                    Focus::Key(0)
+                } else {
+                    Focus::Active(0)
+                }
+            }
+            Focus::Active(i) if i + 1 < self.active_choices.len() => Focus::Active(i + 1),
+            Focus::Active(_) => Focus::Key(0),
+            Focus::Key(i) if i + 1 < KEY_VENDORS.len() => Focus::Key(i + 1),
+            Focus::Key(_) => Focus::Save,
+            Focus::Save => {
+                if !self.active_choices.is_empty() {
+                    Focus::Active(0)
+                } else {
+                    Focus::Key(0)
+                }
+            }
+        }
+    }
+
+    fn prev_focus(&self) -> Focus {
+        match self.focus {
+            Focus::Primary => Focus::Save,
+            Focus::Active(0) => Focus::Primary,
+            Focus::Active(i) => Focus::Active(i - 1),
+            Focus::Key(0) => self
+                .active_choices
+                .len()
+                .checked_sub(1)
+                .map(Focus::Active)
+                .unwrap_or(Focus::Primary),
+            Focus::Key(i) => Focus::Key(i - 1),
+            Focus::Save => Focus::Key(KEY_VENDORS.len() - 1),
         }
     }
 
@@ -408,11 +474,11 @@ pub fn handle_key(state: &mut SettingsState, code: KeyCode, mods: KeyModifiers) 
     }
     match code {
         KeyCode::Tab | KeyCode::Down => {
-            state.focus = state.focus.next();
+            state.focus = state.next_focus();
             return Action::Continue;
         }
         KeyCode::BackTab | KeyCode::Up => {
-            state.focus = state.focus.prev();
+            state.focus = state.prev_focus();
             return Action::Continue;
         }
         _ => {}
@@ -437,6 +503,11 @@ pub fn handle_key(state: &mut SettingsState, code: KeyCode, mods: KeyModifiers) 
     // Field-specific handling.
     match state.focus {
         Focus::Primary => handle_primary(state, code),
+        Focus::Active(i) => {
+            if matches!(code, KeyCode::Char(' ') | KeyCode::Enter) {
+                state.toggle_active(i);
+            }
+        }
         Focus::Key(i) => {
             if let Some(input) = state.keys.get_mut(i) {
                 handle_input(input, code);
@@ -465,7 +536,7 @@ fn try_save(state: &mut SettingsState) -> Action {
 }
 
 fn handle_primary(state: &mut SettingsState, code: KeyCode) {
-    // Left/Right cycles the primary-vendor radio over enabled vendors only.
+    // Left/Right cycles the primary-vendor radio over active providers only.
     let choices = &state.primary_choices;
     let Some(idx) = choices.iter().position(|v| *v == state.primary) else {
         return;
@@ -508,6 +579,7 @@ fn save_to_config_default(state: &SettingsState) -> Result<()> {
 pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
     let mut doc = read_config_document(path)?;
 
+    let mut active_vendors = state.active_vendors.clone();
     // Remove fields written by the short-lived inline Copilot-token design.
     // GitHub CLI owns the OAuth credential now; retaining a secret this app
     // neither reads nor supports would be misleading and unsafe.
@@ -519,27 +591,45 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
         table.remove("token_env");
     }
 
-    // Only Copilot is deliberately offered before it is enabled: choosing it
-    // is the explicit opt-in after the GitHub CLI login. The env-only key
-    // vendors (any `KEY_VENDORS` entry whose credential the user reached via
-    // `OLLAMA_API_KEY` or another env var) are also offered before they are
-    // enabled, and selecting them is the explicit opt-in for that vendor —
-    // otherwise a user could pick a vendor in the overlay and the fetch
-    // would still fail because `enabled = false`. Every other choice remains
-    // enabled-only, so no failed provider is persisted as primary.
-    if state.primary_choices.contains(&state.primary) {
-        set_string(&mut doc, "ui", "primary", state.primary.slug())?;
-        if state.primary == VendorId::Copilot || KEY_VENDORS.iter().any(|kv| kv.id == state.primary)
-        {
-            set_bool(&mut doc, state.primary.config_section(), "enabled", true)?;
-        }
-    }
-
     for (i, kv) in KEY_VENDORS.iter().enumerate() {
         let Some(input) = state.keys.get(i) else {
             continue;
         };
         update_key(&mut doc, kv, input)?;
+        // Pasting a key is an explicit selection signal: keep the provider in
+        // the active fetch/display scope. Clearing a key removes it because it
+        // cannot be automatically fetched any longer.
+        if input.dirty {
+            if input.buf.is_empty() {
+                active_vendors.retain(|id| *id != kv.id);
+            } else if !active_vendors.contains(&kv.id) {
+                active_vendors.push(kv.id);
+            }
+        }
+    }
+    // Choosing Copilot as primary is its explicit opt-in (GitHub CLI owns the
+    // credential, so no key paste can enable it). Ensure it enters the active
+    // scope so the primary survives instead of being pruned as inactive.
+    if state.primary == VendorId::Copilot && !active_vendors.contains(&VendorId::Copilot) {
+        active_vendors.push(VendorId::Copilot);
+    }
+
+    // Persist canonical ordering rather than toggle order, so all frontends
+    // receive stable provider ordering.
+    active_vendors = VendorId::all()
+        .iter()
+        .copied()
+        .filter(|id| active_vendors.contains(id))
+        .collect();
+    set_vendor_list(&mut doc, "ui", "active_vendors", &active_vendors)?;
+    if active_vendors.contains(&state.primary) {
+        set_string(&mut doc, "ui", "primary", state.primary.slug())?;
+        if state.primary == VendorId::Copilot || KEY_VENDORS.iter().any(|kv| kv.id == state.primary)
+        {
+            set_bool(&mut doc, state.primary.config_section(), "enabled", true)?;
+        }
+    } else {
+        remove_field(&mut doc, "ui", "primary")?;
     }
 
     write_config_document(path, &doc)
@@ -587,6 +677,40 @@ fn set_string(doc: &mut DocumentMut, section: &str, key: &str, new_value: &str) 
     Ok(())
 }
 
+/// Persist a stable vendor-id list in a TOML array.
+fn set_vendor_list(
+    doc: &mut DocumentMut,
+    section: &str,
+    key: &str,
+    vendors: &[VendorId],
+) -> Result<()> {
+    let table = doc
+        .entry(section)
+        .or_insert_with(toml_edit::table)
+        .as_table_mut()
+        .ok_or_else(|| AppError::Other(format!("config.toml: [{section}] is not a table")))?;
+    let mut values = toml_edit::Array::new();
+    for vendor in vendors {
+        values.push(vendor.slug());
+    }
+    table.insert(key, value(values));
+    Ok(())
+}
+
+/// Remove one field when its state would otherwise reference a provider outside
+/// the active scope. This intentionally preserves the surrounding table and
+/// its comments.
+fn remove_field(doc: &mut DocumentMut, section: &str, key: &str) -> Result<()> {
+    let Some(table) = doc.get_mut(section) else {
+        return Ok(());
+    };
+    let table = table
+        .as_table_mut()
+        .ok_or_else(|| AppError::Other(format!("config.toml: [{section}] is not a table")))?;
+    table.remove(key);
+    Ok(())
+}
+
 fn default_config_path() -> Result<PathBuf> {
     // Save back to the same file Config::load() selected. On macOS this may be
     // the legacy ~/.config path when the canonical Application Support file is
@@ -607,6 +731,8 @@ struct SettingsSnapshot {
     schema_version: u8,
     primary: String,
     primary_choices: Vec<PrimaryChoice>,
+    active_vendors: Vec<String>,
+    active_choices: Vec<PrimaryChoice>,
     keys: Vec<KeyStatus>,
 }
 
@@ -637,6 +763,8 @@ struct ApplyRequest {
     schema_version: u8,
     primary: Option<String>,
     #[serde(default)]
+    active_vendors: Option<Vec<String>>,
+    #[serde(default)]
     keys: BTreeMap<String, KeyMutation>,
 }
 
@@ -658,6 +786,14 @@ fn snapshot_from_config_with(
     let state = SettingsState::from_config(cfg);
     let primary_choices = state
         .primary_choices
+        .iter()
+        .map(|id| PrimaryChoice {
+            id: id.slug().to_string(),
+            label: id.display_name().to_string(),
+        })
+        .collect();
+    let active_choices = state
+        .active_choices
         .iter()
         .map(|id| PrimaryChoice {
             id: id.slug().to_string(),
@@ -686,6 +822,12 @@ fn snapshot_from_config_with(
         schema_version: SETTINGS_SCHEMA_VERSION,
         primary: state.primary.slug().to_string(),
         primary_choices,
+        active_vendors: state
+            .active_vendors
+            .iter()
+            .map(|id| id.slug().to_string())
+            .collect(),
+        active_choices,
         keys,
     }
 }
@@ -722,12 +864,47 @@ fn state_from_apply_request(cfg: &Config, raw: &str) -> Result<SettingsState> {
     }
 
     let mut state = SettingsState::from_config(cfg);
+    if let Some(active_vendors) = request.active_vendors {
+        let mut selected = Vec::new();
+        for slug in active_vendors {
+            let id = vendor_from_slug(&slug)
+                .ok_or_else(|| AppError::Other(format!("unknown active vendor {slug:?}")))?;
+            if !state.active_choices.contains(&id) {
+                return Err(AppError::Other(format!(
+                    "active vendor {slug:?} is not enabled"
+                )));
+            }
+            if selected.contains(&id) {
+                return Err(AppError::Other(format!(
+                    "active_vendors contains duplicate vendor {slug:?}"
+                )));
+            }
+            selected.push(id);
+        }
+        state.active_vendors = state
+            .active_choices
+            .iter()
+            .copied()
+            .filter(|id| selected.contains(id))
+            .collect();
+        state.primary_choices = state.active_vendors.clone();
+        if !state.primary_choices.contains(&VendorId::Copilot) {
+            state.primary_choices.push(VendorId::Copilot);
+        }
+        if !state.primary_choices.contains(&state.primary) {
+            state.primary = state
+                .primary_choices
+                .first()
+                .copied()
+                .unwrap_or(VendorId::Anthropic);
+        }
+    }
     if let Some(primary) = request.primary {
         let id = vendor_from_slug(&primary)
             .ok_or_else(|| AppError::Other(format!("unknown primary vendor {primary:?}")))?;
         if !state.primary_choices.contains(&id) {
             return Err(AppError::Other(format!(
-                "primary vendor {primary:?} is not enabled"
+                "primary vendor {primary:?} is not active"
             )));
         }
         state.primary = id;
@@ -858,17 +1035,39 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
 
-    // — Primary vendor + credentials header —
+    // — Primary vendor + active providers + credentials —
     let mut lines: Vec<Line> = vec![
         section_header("Primary vendor", "shown first on the bar / TUI", &bubble),
         primary_line(state, &bubble),
         Line::from(""),
         section_header(
-            "Credentials",
-            "pick a row, type the credential, then Ctrl-S — Claude & Codex use CLI login",
+            "Dashboard providers",
+            "checked providers refresh and appear in the dashboard",
             &bubble,
         ),
     ];
+    if state.active_choices.is_empty() {
+        lines.push(Line::from(vec![
+            bubble.span("     "),
+            bubble.muted("No enabled providers available"),
+        ]));
+    } else {
+        for (index, vendor) in state.active_choices.iter().enumerate() {
+            let focused = state.focus == Focus::Active(index);
+            lines.push(active_provider_row(
+                *vendor,
+                state.is_active(index),
+                focused,
+                &bubble,
+            ));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(section_header(
+        "Credentials",
+        "pick a row, type the credential, then Ctrl-S — Claude & Codex use CLI login",
+        &bubble,
+    ));
     for (i, kv) in KEY_VENDORS.iter().enumerate() {
         let focused = state.focus == Focus::Key(i);
         lines.push(key_row(kv, &state.keys[i], focused, &bubble));
@@ -894,6 +1093,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
         Focus::Primary => bubble.help_line([
             ("↑↓/tab", "move"),
             ("←→", "change vendor"),
+            ("^S", "save"),
+            ("esc", "close"),
+        ]),
+        Focus::Active(_) => bubble.help_line([
+            ("↑↓/tab", "move"),
+            ("space/enter", "toggle"),
             ("^S", "save"),
             ("esc", "close"),
         ]),
@@ -938,6 +1143,42 @@ fn primary_line(state: &SettingsState, theme: &BubbleTheme) -> Line<'static> {
         ])
     } else {
         Line::from(vec![theme.span("     "), Span::styled(name, theme.text)])
+    }
+}
+
+fn active_provider_row(
+    vendor: VendorId,
+    selected: bool,
+    focused: bool,
+    theme: &BubbleTheme,
+) -> Line<'static> {
+    let checkbox = if selected { "[x]" } else { "[ ]" };
+    let label = vendor.display_name();
+    if focused {
+        let checkbox_style = if selected { theme.accent } else { theme.muted };
+        Line::from(vec![
+            theme.span("  "),
+            Span::styled("▸ ", theme.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{checkbox} "),
+                checkbox_style.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {label} "),
+                theme
+                    .selected
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+            ),
+            theme.muted("    Space/Enter to toggle"),
+        ])
+    } else {
+        let checkbox_style = if selected { theme.accent } else { theme.muted };
+        let label_style = if selected { theme.text } else { theme.muted };
+        Line::from(vec![
+            theme.span("     "),
+            Span::styled(format!("{checkbox} "), checkbox_style),
+            Span::styled(label.to_string(), label_style),
+        ])
     }
 }
 
@@ -1088,6 +1329,8 @@ mod tests {
             focus: Focus::Primary,
             primary_choices: VendorId::all().to_vec(),
             primary,
+            active_choices: VendorId::all().to_vec(),
+            active_vendors: VendorId::all().to_vec(),
             keys: KEY_VENDORS.iter().map(|_| KeyInput::default()).collect(),
             status: String::new(),
         }
@@ -1164,49 +1407,120 @@ mod tests {
         );
     }
 
-    /// The exported-env-var path is real behaviour and deserves a test of its
-    /// own — just not one that reads the machine it runs on.
     #[test]
-    fn a_key_vendor_with_its_env_var_exported_is_offered() {
+    fn from_config_offers_active_vendors_only() {
         let cfg = Config::default();
-        let env = cfg.api_key_env_for(VendorId::Ollama).to_string();
-
-        let without = SettingsState::from_config_with(&cfg, |_| false);
-        assert!(!without.primary_choices.contains(&VendorId::Ollama));
-
-        let with = SettingsState::from_config_with(&cfg, |name| name == env);
-        assert!(
-            with.primary_choices.contains(&VendorId::Ollama),
-            "a key vendor whose env var is exported must be selectable: {:?}",
-            with.primary_choices
-        );
-    }
-
-    #[test]
-    fn from_config_offers_enabled_vendors_only() {
-        let cfg = Config::default();
-        // No ambient environment: this must not depend on whether the machine
-        // running `cargo test` happens to export OLLAMA_API_KEY or friends.
         let s = SettingsState::from_config_with(&cfg, |_| false);
-        let mut expected = cfg.enabled_vendors();
-        expected.push(VendorId::Copilot);
+        let mut expected = cfg.active_vendors();
+        if !expected.contains(&VendorId::Copilot) {
+            expected.push(VendorId::Copilot);
+        }
         assert_eq!(s.primary_choices, expected);
-        // API-key opt-in vendors are disabled by default and must not be
-        // offered. Copilot is the exception: choosing it enables it safely.
+        assert_eq!(s.active_choices, cfg.enabled_vendors());
+        assert_eq!(s.active_vendors, cfg.active_vendors());
         assert!(!s.primary_choices.contains(&VendorId::Grok));
-        assert!(s.primary_choices.contains(&s.primary));
-        assert!(s.primary_choices.contains(&VendorId::Copilot));
+        if !s.primary_choices.is_empty() {
+            assert!(s.primary_choices.contains(&s.primary));
+        }
     }
 
     #[test]
     fn from_config_falls_back_when_configured_primary_is_disabled() {
         // Grok is opt-in; a config naming it as primary without enabling it
-        // must display the first enabled vendor instead.
+        // must display the first active vendor instead.
         let mut cfg = Config::default();
         cfg.ui.primary = Some(VendorId::Grok);
         let s = SettingsState::from_config(&cfg);
         assert_ne!(s.primary, VendorId::Grok);
-        assert_eq!(Some(s.primary), cfg.enabled_vendors().first().copied());
+        assert_eq!(Some(s.primary), cfg.active_vendors().first().copied());
+    }
+
+    #[test]
+    fn active_provider_checkbox_toggles_and_repairs_primary() {
+        let mut state = blank_state(VendorId::Anthropic);
+        state.active_choices = vec![VendorId::Anthropic, VendorId::Openai, VendorId::Zai];
+        state.active_vendors = vec![VendorId::Anthropic, VendorId::Openai];
+        state.primary_choices = state.active_vendors.clone();
+
+        state.focus = Focus::Active(2);
+        handle_key(&mut state, KeyCode::Char(' '), KeyModifiers::NONE);
+        assert_eq!(
+            state.active_vendors,
+            vec![VendorId::Anthropic, VendorId::Openai, VendorId::Zai]
+        );
+
+        state.focus = Focus::Active(0);
+        handle_key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(state.active_vendors, vec![VendorId::Openai, VendorId::Zai]);
+        assert_eq!(state.primary, VendorId::Openai);
+    }
+
+    #[test]
+    fn save_persists_explicit_active_vendor_list() {
+        let (_dir, path) = temp_config(None);
+        let mut state = blank_state(VendorId::Openai);
+        state.active_choices = vec![VendorId::Anthropic, VendorId::Openai, VendorId::Zai];
+        state.active_vendors = vec![VendorId::Openai, VendorId::Zai];
+        state.primary_choices = state.active_vendors.clone();
+        save_to_path(&state, &path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("active_vendors = [\"openai\", \"zai\"]"));
+        assert!(raw.contains("primary = \"openai\""));
+    }
+
+    #[test]
+    fn saving_a_new_key_adds_its_provider_to_active_scope() {
+        let (_dir, path) = temp_config(None);
+        let mut state = blank_state(VendorId::Anthropic);
+        state.active_choices = vec![VendorId::Anthropic];
+        state.active_vendors = vec![VendorId::Anthropic];
+        state.primary_choices = state.active_vendors.clone();
+        let index = key_index(VendorId::Zai);
+        state.keys[index] = KeyInput::from_config(Some("test-key"));
+        state.keys[index].dirty = true;
+        save_to_path(&state, &path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("active_vendors = [\"anthropic\", \"zai\"]"));
+        assert!(raw.contains("[zai]"));
+        assert!(raw.contains("enabled = true"));
+    }
+
+    #[test]
+    fn settings_snapshot_exposes_active_choices_and_selection() {
+        let mut config = Config::default();
+        config.zai.api_key = Some("never-serialize-this".into());
+        config.ui.active_vendors = Some(vec![VendorId::Anthropic, VendorId::Zai]);
+        let raw = settings_snapshot_json_with(&config, |_| false).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            value["active_vendors"],
+            serde_json::json!(["anthropic", "zai"])
+        );
+        assert!(
+            value["active_choices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|choice| choice["id"] == "zai")
+        );
+        assert!(!raw.contains("never-serialize-this"));
+    }
+
+    #[test]
+    fn native_patch_applies_active_vendor_selection() {
+        let mut config = Config::default();
+        config.zai.api_key = Some("test-key".into());
+        let request = serde_json::json!({
+            "schema_version": 1,
+            "active_vendors": ["zai", "anthropic"],
+            "keys": {}
+        });
+        let state = state_from_apply_request(&config, &request.to_string()).unwrap();
+        assert_eq!(
+            state.active_vendors,
+            vec![VendorId::Anthropic, VendorId::Zai]
+        );
+        assert_eq!(state.primary_choices[0], VendorId::Anthropic);
     }
 
     #[test]
@@ -1368,13 +1682,13 @@ api_key_env = "OPENROUTER_WORK_API_KEY"
     }
 
     #[test]
-    fn tab_cycles_focus_from_primary_to_first_key() {
+    fn tab_cycles_focus_from_primary_to_first_active_provider() {
         let mut s = blank_state(VendorId::Anthropic);
         assert_eq!(
             handle_key(&mut s, KeyCode::Tab, KeyModifiers::NONE),
             Action::Continue
         );
-        assert_eq!(s.focus, Focus::Key(0));
+        assert_eq!(s.focus, Focus::Active(0));
         assert_eq!(
             handle_key(&mut s, KeyCode::BackTab, KeyModifiers::NONE),
             Action::Continue
@@ -1437,14 +1751,14 @@ api_key_env = "OPENROUTER_WORK_API_KEY"
 
     #[test]
     fn save_does_not_write_a_disabled_primary() {
-        // Saving an API key must not persist a primary the resolver would
-        // ignore; an existing value in the file stays untouched.
+        // Saving must not leave a primary outside the active fetch scope.
         let (_dir, path) = temp_config(Some("[ui]\nprimary = \"anthropic\"\n"));
         let mut s = state_with("zk", "ok", VendorId::Grok);
         s.primary_choices = vec![VendorId::Anthropic];
+        s.active_vendors = vec![VendorId::Anthropic];
         save_to_path(&s, &path).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("primary = \"anthropic\""));
+        assert!(!raw.contains("primary ="));
         assert!(!raw.contains("primary = \"grok\""));
         // The keys still saved.
         assert!(raw.contains("zk"));

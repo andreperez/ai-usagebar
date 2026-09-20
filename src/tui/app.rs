@@ -146,10 +146,11 @@ impl TabId {
     }
 }
 
-/// Expand enabled vendors into the tab list. Claude, OpenRouter, and Codex
+/// Expand active vendors into the tab list. Claude, OpenRouter, and Codex
 /// (OpenAI) yield their default account followed by configured named accounts;
 /// every other vendor is a single tab. With no extra accounts the result equals
-/// `config.enabled_vendors()`, preserving the historical tab set and order.
+/// `config.active_vendors()`, preserving the historical tab set and order for
+/// the providers the user explicitly chose to refresh and display.
 ///
 /// Config-only and pure — no Desktop profiles. Production uses
 /// [`tabs_with_desktop`]; this stays for the hermetic unit tests and any caller
@@ -180,7 +181,10 @@ pub fn tabs_with_desktop(config: &Config) -> Vec<TabId> {
 fn build_tabs(config: &Config, desktop_labels: &[String]) -> Vec<TabId> {
     let desktop_set: HashSet<&str> = desktop_labels.iter().map(String::as_str).collect();
     let mut tabs = Vec::new();
-    for vendor in config.enabled_vendors() {
+    // `active_vendors` is the automatic fetch/display scope. It already
+    // intersects the enabled providers, so hidden providers do not become
+    // background-refresh TUI tabs.
+    for vendor in config.active_vendors() {
         if vendor == VendorId::Anthropic {
             let accounts: Vec<_> = config
                 .anthropic
@@ -1088,12 +1092,20 @@ mod tests {
 
     #[test]
     fn tabs_without_accounts_are_just_enabled_vendors() {
-        // No [[anthropic.accounts]] → one tab per enabled vendor, unchanged.
+        // No [[anthropic.accounts]] → one tab per active vendor, unchanged.
         let config = Config::default();
         let tabs = tabs_from_config(&config);
         let vendors: Vec<VendorId> = tabs.iter().filter_map(TabId::vendor_id).collect();
-        assert_eq!(vendors, config.enabled_vendors());
+        assert_eq!(vendors, config.active_vendors());
         assert!(tabs.iter().all(|t| t.account.is_none()));
+    }
+
+    #[test]
+    fn tabs_respect_explicit_active_vendor_scope() {
+        let mut config = Config::default();
+        config.ui.active_vendors = Some(vec![VendorId::Zai]);
+        let tabs = tabs_from_config(&config);
+        assert_eq!(tabs, vec![TabId::vendor(VendorId::Zai)]);
     }
 
     #[test]

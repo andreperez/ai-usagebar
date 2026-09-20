@@ -381,7 +381,7 @@ impl Cli {
     ///   1. explicit `--vendor` (highest)
     ///   2. persisted scroll-cycle state (`~/.cache/ai-usagebar/active_vendor`)
     ///   3. `[ui] primary` from config
-    ///   4. anthropic (lowest)
+    ///   4. first active provider, then anthropic only as a rejected fallback
     ///
     /// This reads the persisted scroll-cycle state from disk via
     /// [`crate::active::read`]. The pure precedence logic lives in
@@ -413,26 +413,26 @@ impl Cli {
         if let Some(v) = self.vendor {
             return v;
         }
+        let active_vendors = config.active_vendors();
         if let Some(id) = active
-            && config.is_enabled(id)
+            && active_vendors.contains(&id)
         {
             return id_to_vendor(id);
         }
         if let Some(id) = config.ui.primary
-            && config.is_enabled(id)
+            && active_vendors.contains(&id)
         {
             return id_to_vendor(id);
         }
-        if config.is_enabled(crate::vendor::VendorId::Anthropic) {
+        if active_vendors.contains(&crate::vendor::VendorId::Anthropic) {
             return Vendor::Anthropic;
         }
-        config
-            .enabled_vendors()
+        active_vendors
             .into_iter()
             .next()
             .map(id_to_vendor)
-            // A completely disabled configuration has no enabled choice; keep
-            // the historic final fallback rather than rejecting widget startup.
+            // An empty explicit selection still needs a concrete enum here;
+            // dispatch eligibility rejects it before any provider fetch.
             .unwrap_or(Vendor::Anthropic)
     }
 }
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn active_override_wins_over_config_primary_when_enabled() {
         // Precedence rule #2: a persisted scroll-cycle vendor beats [ui]
-        // primary, as long as it is still enabled.
+        // primary, as long as it remains in the active scope.
         let cli = Cli::parse_from(["ai-usagebar"]);
         let mut cfg = crate::config::Config::default();
         cfg.ui.primary = Some(crate::vendor::VendorId::Openrouter);
@@ -829,6 +829,16 @@ mod tests {
         cfg.ui.primary = Some(crate::vendor::VendorId::Openrouter);
         let active = Some(crate::vendor::VendorId::Zai);
         assert_eq!(cli.resolve_vendor_with(&cfg, active), Vendor::Openrouter);
+    }
+
+    #[test]
+    fn explicit_active_scope_controls_implicit_default_resolution() {
+        let cli = Cli::parse_from(["ai-usagebar"]);
+        let mut cfg = crate::config::Config::default();
+        cfg.ui.active_vendors = Some(vec![crate::vendor::VendorId::Zai]);
+        // Anthropic is enabled by default but is outside the explicit
+        // automatic scope, so the implicit widget must select Z.AI.
+        assert_eq!(cli.resolve_vendor_with(&cfg, None), Vendor::Zai);
     }
 
     #[test]

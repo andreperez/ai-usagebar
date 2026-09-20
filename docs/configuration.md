@@ -24,6 +24,11 @@ ai-usagebar-tui --config ./config.test.toml
 #                         # | zai | openrouter | deepseek | kimi | kilo | novita
 #                         # | moonshot | grok | supergrok | grokbot | antigravity | cursor
 #                         # | minimax | kiro | nous | opencode-go | commandcode
+# Explicit provider scope for automatic fetches (TUI tabs/Overview,
+# `usage --json`, widget cycling/default). Omit for every enabled provider;
+# [] disables automatic fetches while keeping explicit --vendor checks.
+# Managed via the TUI Settings Dashboard providers checkboxes.
+# active_vendors = ["anthropic", "openai", "zai", "openrouter"]
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui
