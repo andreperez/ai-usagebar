@@ -29,6 +29,9 @@ ai-usagebar-tui --config ./config.test.toml
 # [] disables automatic fetches while keeping explicit --vendor checks.
 # Managed via the TUI Settings Dashboard providers checkboxes.
 # active_vendors = ["anthropic", "openai", "zai", "openrouter"]
+# The `[[custom]]` counterpart, keyed by custom provider id; enabled custom
+# providers get checkboxes in the same overlay section.
+# active_custom = ["tavily", "firecrawl"]
 
 [context]
 enabled = false           # opt in, then press c in ai-usagebar-tui

@@ -285,6 +285,10 @@ pub struct SettingsState {
     pub active_choices: Vec<VendorId>,
     /// Explicit selected subset, stored as `[ui] active_vendors` on save.
     pub active_vendors: Vec<VendorId>,
+    /// `(id, name)` of every enabled `[[custom]]` provider, config order.
+    pub custom_choices: Vec<(String, String)>,
+    /// Selected custom subset, stored as `[ui] active_custom` on save.
+    pub active_custom: Vec<String>,
     /// One input per [`KEY_VENDORS`] entry, same order.
     pub keys: Vec<KeyInput>,
     /// One-line status displayed in the footer ("saved …", "save failed …").
@@ -309,6 +313,11 @@ impl SettingsState {
             .collect();
         let active_choices: Vec<VendorId> = cfg.enabled_vendors();
         let active_vendors = cfg.active_vendors();
+        let custom_choices: Vec<(String, String)> = cfg
+            .enabled_custom()
+            .map(|spec| (spec.id.clone(), spec.name.clone()))
+            .collect();
+        let active_custom = cfg.active_customs();
         let mut primary_choices = active_vendors.clone();
         // Copilot credentials belong to GitHub CLI, so a login cannot write a
         // local key that would also opt it in. Offer it explicitly instead:
@@ -334,64 +343,96 @@ impl SettingsState {
             primary,
             active_choices,
             active_vendors,
+            custom_choices,
+            active_custom,
             keys,
             status: String::new(),
         }
     }
 
-    /// Whether an active-provider checkbox is selected.
-    pub fn is_active(&self, index: usize) -> bool {
-        self.active_choices
-            .get(index)
-            .is_some_and(|vendor| self.active_vendors.contains(vendor))
+    /// Total checkbox rows: built-in providers followed by custom providers.
+    fn active_row_count(&self) -> usize {
+        self.active_choices.len() + self.custom_choices.len()
     }
 
-    /// Toggle a provider in the automatic fetch/display scope.
-    /// Selection order always follows `active_choices`, not toggle order, so
-    /// every frontend receives stable canonical ordering.
+    /// Whether an active-provider checkbox is selected.
+    pub fn is_active(&self, index: usize) -> bool {
+        if let Some(vendor) = self.active_choices.get(index) {
+            return self.active_vendors.contains(vendor);
+        }
+        match index
+            .checked_sub(self.active_choices.len())
+            .and_then(|offset| self.custom_choices.get(offset))
+        {
+            Some((id, _)) => self.active_custom.iter().any(|c| c == id),
+            None => false,
+        }
+    }
+
+    /// Toggle a provider in the automatic fetch/display scope. Built-in rows
+    /// come first; rows past `active_choices` index `custom_choices`. Selection
+    /// order always follows the choice lists, not toggle order, so every
+    /// frontend receives stable canonical ordering.
     pub fn toggle_active(&mut self, index: usize) {
-        let Some(vendor) = self.active_choices.get(index).copied() else {
+        if let Some(&vendor) = self.active_choices.get(index) {
+            if let Some(position) = self.active_vendors.iter().position(|id| *id == vendor) {
+                self.active_vendors.remove(position);
+            } else {
+                self.active_vendors.push(vendor);
+            }
+            self.active_vendors = self
+                .active_choices
+                .iter()
+                .copied()
+                .filter(|id| self.active_vendors.contains(id))
+                .collect();
+            self.primary_choices = self.active_vendors.clone();
+            if !self.primary_choices.contains(&VendorId::Copilot) {
+                self.primary_choices.push(VendorId::Copilot);
+            }
+            if !self.primary_choices.contains(&self.primary) {
+                self.primary = self
+                    .primary_choices
+                    .first()
+                    .copied()
+                    .unwrap_or(VendorId::Anthropic);
+            }
+            return;
+        }
+        let Some(offset) = index.checked_sub(self.active_choices.len()) else {
             return;
         };
-        if let Some(position) = self.active_vendors.iter().position(|id| *id == vendor) {
-            self.active_vendors.remove(position);
+        let Some((id, _)) = self.custom_choices.get(offset) else {
+            return;
+        };
+        if let Some(position) = self.active_custom.iter().position(|c| c == id) {
+            self.active_custom.remove(position);
         } else {
-            self.active_vendors.push(vendor);
+            self.active_custom.push(id.clone());
         }
-        self.active_vendors = self
-            .active_choices
+        self.active_custom = self
+            .custom_choices
             .iter()
-            .copied()
-            .filter(|id| self.active_vendors.contains(id))
+            .map(|(id, _)| id.clone())
+            .filter(|id| self.active_custom.contains(id))
             .collect();
-        self.primary_choices = self.active_vendors.clone();
-        if !self.primary_choices.contains(&VendorId::Copilot) {
-            self.primary_choices.push(VendorId::Copilot);
-        }
-        if !self.primary_choices.contains(&self.primary) {
-            self.primary = self
-                .primary_choices
-                .first()
-                .copied()
-                .unwrap_or(VendorId::Anthropic);
-        }
     }
 
     fn next_focus(&self) -> Focus {
         match self.focus {
             Focus::Primary => {
-                if self.active_choices.is_empty() {
+                if self.active_row_count() == 0 {
                     Focus::Key(0)
                 } else {
                     Focus::Active(0)
                 }
             }
-            Focus::Active(i) if i + 1 < self.active_choices.len() => Focus::Active(i + 1),
+            Focus::Active(i) if i + 1 < self.active_row_count() => Focus::Active(i + 1),
             Focus::Active(_) => Focus::Key(0),
             Focus::Key(i) if i + 1 < KEY_VENDORS.len() => Focus::Key(i + 1),
             Focus::Key(_) => Focus::Save,
             Focus::Save => {
-                if !self.active_choices.is_empty() {
+                if self.active_row_count() > 0 {
                     Focus::Active(0)
                 } else {
                     Focus::Key(0)
@@ -406,8 +447,7 @@ impl SettingsState {
             Focus::Active(0) => Focus::Primary,
             Focus::Active(i) => Focus::Active(i - 1),
             Focus::Key(0) => self
-                .active_choices
-                .len()
+                .active_row_count()
                 .checked_sub(1)
                 .map(Focus::Active)
                 .unwrap_or(Focus::Primary),
@@ -622,6 +662,13 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
         .filter(|id| active_vendors.contains(id))
         .collect();
     set_vendor_list(&mut doc, "ui", "active_vendors", &active_vendors)?;
+    let active_custom: Vec<String> = state
+        .custom_choices
+        .iter()
+        .map(|(id, _)| id.clone())
+        .filter(|id| state.active_custom.contains(id))
+        .collect();
+    set_string_list(&mut doc, "ui", "active_custom", &active_custom)?;
     if active_vendors.contains(&state.primary) {
         set_string(&mut doc, "ui", "primary", state.primary.slug())?;
         if state.primary == VendorId::Copilot || KEY_VENDORS.iter().any(|kv| kv.id == state.primary)
@@ -684,16 +731,27 @@ fn set_vendor_list(
     key: &str,
     vendors: &[VendorId],
 ) -> Result<()> {
+    let strings: Vec<String> = vendors.iter().map(|id| id.slug().to_string()).collect();
+    set_string_list(doc, section, key, &strings)
+}
+
+/// Persist a list of plain strings in a TOML array.
+fn set_string_list(
+    doc: &mut DocumentMut,
+    section: &str,
+    key: &str,
+    values: &[String],
+) -> Result<()> {
     let table = doc
         .entry(section)
         .or_insert_with(toml_edit::table)
         .as_table_mut()
         .ok_or_else(|| AppError::Other(format!("config.toml: [{section}] is not a table")))?;
-    let mut values = toml_edit::Array::new();
-    for vendor in vendors {
-        values.push(vendor.slug());
+    let mut array = toml_edit::Array::new();
+    for value in values {
+        array.push(value.as_str());
     }
-    table.insert(key, value(values));
+    table.insert(key, value(array));
     Ok(())
 }
 
@@ -733,6 +791,8 @@ struct SettingsSnapshot {
     primary_choices: Vec<PrimaryChoice>,
     active_vendors: Vec<String>,
     active_choices: Vec<PrimaryChoice>,
+    active_custom: Vec<String>,
+    custom_choices: Vec<PrimaryChoice>,
     keys: Vec<KeyStatus>,
 }
 
@@ -764,6 +824,8 @@ struct ApplyRequest {
     primary: Option<String>,
     #[serde(default)]
     active_vendors: Option<Vec<String>>,
+    #[serde(default)]
+    active_custom: Option<Vec<String>>,
     #[serde(default)]
     keys: BTreeMap<String, KeyMutation>,
 }
@@ -800,6 +862,14 @@ fn snapshot_from_config_with(
             label: id.display_name().to_string(),
         })
         .collect();
+    let custom_choices = state
+        .custom_choices
+        .iter()
+        .map(|(id, name)| PrimaryChoice {
+            id: id.clone(),
+            label: name.clone(),
+        })
+        .collect();
     let keys = KEY_VENDORS
         .iter()
         .map(|vendor| {
@@ -828,6 +898,8 @@ fn snapshot_from_config_with(
             .map(|id| id.slug().to_string())
             .collect(),
         active_choices,
+        active_custom: state.active_custom.clone(),
+        custom_choices,
         keys,
     }
 }
@@ -898,6 +970,28 @@ fn state_from_apply_request(cfg: &Config, raw: &str) -> Result<SettingsState> {
                 .copied()
                 .unwrap_or(VendorId::Anthropic);
         }
+    }
+    if let Some(active_custom) = request.active_custom {
+        let mut selected = Vec::new();
+        for id in active_custom {
+            if !state.custom_choices.iter().any(|(c, _)| *c == id) {
+                return Err(AppError::Other(format!(
+                    "active custom provider {id:?} is not enabled"
+                )));
+            }
+            if selected.contains(&id) {
+                return Err(AppError::Other(format!(
+                    "active_custom contains duplicate provider {id:?}"
+                )));
+            }
+            selected.push(id);
+        }
+        state.active_custom = state
+            .custom_choices
+            .iter()
+            .map(|(id, _)| id.clone())
+            .filter(|id| selected.contains(id))
+            .collect();
     }
     if let Some(primary) = request.primary {
         let id = vendor_from_slug(&primary)
@@ -1046,7 +1140,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
             &bubble,
         ),
     ];
-    if state.active_choices.is_empty() {
+    if state.active_row_count() == 0 {
         lines.push(Line::from(vec![
             bubble.span("     "),
             bubble.muted("No enabled providers available"),
@@ -1056,6 +1150,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
             let focused = state.focus == Focus::Active(index);
             lines.push(active_provider_row(
                 *vendor,
+                state.is_active(index),
+                focused,
+                &bubble,
+            ));
+        }
+        for (offset, (id, name)) in state.custom_choices.iter().enumerate() {
+            let index = state.active_choices.len() + offset;
+            let focused = state.focus == Focus::Active(index);
+            lines.push(custom_provider_row(
+                id,
+                name,
                 state.is_active(index),
                 focused,
                 &bubble,
@@ -1152,8 +1257,21 @@ fn active_provider_row(
     focused: bool,
     theme: &BubbleTheme,
 ) -> Line<'static> {
+    checkbox_row(vendor.display_name(), selected, focused, theme)
+}
+
+fn custom_provider_row(
+    id: &str,
+    name: &str,
+    selected: bool,
+    focused: bool,
+    theme: &BubbleTheme,
+) -> Line<'static> {
+    checkbox_row(&format!("{name} ({id})"), selected, focused, theme)
+}
+
+fn checkbox_row(label: &str, selected: bool, focused: bool, theme: &BubbleTheme) -> Line<'static> {
     let checkbox = if selected { "[x]" } else { "[ ]" };
-    let label = vendor.display_name();
     if focused {
         let checkbox_style = if selected { theme.accent } else { theme.muted };
         Line::from(vec![
@@ -1331,6 +1449,8 @@ mod tests {
             primary,
             active_choices: VendorId::all().to_vec(),
             active_vendors: VendorId::all().to_vec(),
+            custom_choices: Vec::new(),
+            active_custom: Vec::new(),
             keys: KEY_VENDORS.iter().map(|_| KeyInput::default()).collect(),
             status: String::new(),
         }
@@ -1521,6 +1641,117 @@ mod tests {
             vec![VendorId::Anthropic, VendorId::Zai]
         );
         assert_eq!(state.primary_choices[0], VendorId::Anthropic);
+    }
+
+    fn custom_spec(id: &str) -> crate::config::CustomProviderConfig {
+        crate::config::CustomProviderConfig {
+            id: id.into(),
+            name: format!("{id} Tool"),
+            short_name: "myt".into(),
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn from_config_offers_custom_providers_as_active_choices() {
+        let config = Config {
+            custom: vec![custom_spec("tavily"), custom_spec("firecrawl")],
+            ..Default::default()
+        };
+        let state = SettingsState::from_config(&config);
+        assert_eq!(
+            state.custom_choices,
+            vec![
+                ("tavily".to_string(), "tavily Tool".to_string()),
+                ("firecrawl".to_string(), "firecrawl Tool".to_string()),
+            ]
+        );
+        // None → every enabled custom provider is selected by default.
+        assert_eq!(
+            state.active_custom,
+            ["tavily".to_string(), "firecrawl".to_string()]
+        );
+    }
+
+    #[test]
+    fn custom_checkbox_toggles_after_the_builtin_rows() {
+        let mut state = blank_state(VendorId::Anthropic);
+        state.active_choices = vec![VendorId::Anthropic];
+        state.active_vendors = vec![VendorId::Anthropic];
+        state.custom_choices = vec![("tavily".into(), "Tavily".into())];
+        state.active_custom = vec!["tavily".into()];
+
+        // Focus::Active index 1 is past the single built-in row → the custom row.
+        state.focus = Focus::Active(1);
+        assert!(state.is_active(1));
+        handle_key(&mut state, KeyCode::Char(' '), KeyModifiers::NONE);
+        assert!(!state.is_active(1));
+        assert!(state.active_custom.is_empty());
+        handle_key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(state.active_custom, vec!["tavily".to_string()]);
+    }
+
+    #[test]
+    fn save_persists_active_custom_selection() {
+        let (_dir, path) = temp_config(None);
+        let mut state = blank_state(VendorId::Anthropic);
+        state.active_choices = vec![VendorId::Anthropic];
+        state.active_vendors = vec![VendorId::Anthropic];
+        state.primary_choices = vec![VendorId::Anthropic];
+        state.custom_choices = vec![
+            ("tavily".into(), "Tavily".into()),
+            ("firecrawl".into(), "Firecrawl".into()),
+        ];
+        state.active_custom = vec!["firecrawl".into()];
+        save_to_path(&state, &path).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("active_custom = [\"firecrawl\"]"));
+        assert!(raw.contains("active_vendors = [\"anthropic\"]"));
+    }
+
+    #[test]
+    fn snapshot_and_apply_round_trip_custom_selection() {
+        let config = Config {
+            custom: vec![custom_spec("tavily"), custom_spec("firecrawl")],
+            ui: crate::config::UiConfig {
+                active_custom: Some(vec!["firecrawl".into()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let raw = settings_snapshot_json_with(&config, |_| false).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["active_custom"], serde_json::json!(["firecrawl"]));
+        assert_eq!(value["custom_choices"].as_array().unwrap().len(), 2);
+
+        let request = serde_json::json!({
+            "schema_version": 1,
+            "active_custom": ["firecrawl", "tavily"],
+            "keys": {}
+        });
+        let state = state_from_apply_request(&config, &request.to_string()).unwrap();
+        // Stored order is config order, not request order.
+        assert_eq!(
+            state.active_custom,
+            ["tavily".to_string(), "firecrawl".to_string()]
+        );
+
+        let bad = serde_json::json!({
+            "schema_version": 1,
+            "active_custom": ["ghost"],
+            "keys": {}
+        });
+        let error = state_from_apply_request(&config, &bad.to_string()).unwrap_err();
+        assert!(error.to_string().contains("is not enabled"));
+
+        let dup = serde_json::json!({
+            "schema_version": 1,
+            "active_custom": ["tavily", "tavily"],
+            "keys": {}
+        });
+        let error = state_from_apply_request(&config, &dup.to_string()).unwrap_err();
+        assert!(error.to_string().contains("duplicate"));
     }
 
     #[test]

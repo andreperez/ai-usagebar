@@ -222,8 +222,13 @@ fn build_tabs(config: &Config, desktop_labels: &[String]) -> Vec<TabId> {
             tabs.push(TabId::vendor(vendor));
         }
     }
-    // Custom providers follow every built-in vendor, in config order.
-    for spec in config.enabled_custom() {
+    // Custom providers follow every built-in vendor, in config order, gated by
+    // the same explicit-scope semantics as the built-ins.
+    let active_customs = config.active_customs();
+    for spec in config
+        .enabled_custom()
+        .filter(|spec| active_customs.contains(&spec.id))
+    {
         tabs.push(TabId::custom(spec));
     }
     tabs
@@ -1550,6 +1555,25 @@ mod tests {
                 .all(|t| matches!(t.source, TabSource::Builtin(_)))
         );
         assert_eq!(tabs.len(), config.enabled_vendors().len());
+    }
+
+    #[test]
+    fn custom_tabs_respect_the_explicit_active_custom_scope() {
+        let config = Config {
+            custom: vec![custom_spec("mytool", true), custom_spec("other", true)],
+            ui: crate::config::UiConfig {
+                active_custom: Some(vec!["other".into()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let tabs = tabs_from_config(&config);
+        let customs: Vec<TabId> = tabs
+            .iter()
+            .filter(|t| matches!(t.source, TabSource::Custom { .. }))
+            .cloned()
+            .collect();
+        assert_eq!(customs, vec![TabId::custom(&config.custom[1])]);
     }
 
     #[test]

@@ -20,6 +20,9 @@
 # explicit `--vendor` one-off checks. Managed in the TUI Settings overlay
 # (Dashboard providers checkboxes); saving a new API key auto-selects it.
 # active_vendors = ["anthropic", "openai", "zai", "openrouter"]
+# The `[[custom]]` counterpart, keyed by custom provider id — the overlay
+# lists enabled custom providers as extra checkboxes below the built-ins.
+# active_custom = ["tavily", "firecrawl"]
 # Which vendors the Overview lists (the TUI's first tab / the macOS menu-bar's
 # top section), in this order. Omit for every active vendor.
 # overview_vendors = ["anthropic", "cursor", "openai"]
@@ -34,7 +37,9 @@
 # Values are read from the response with RFC 6901 JSON Pointers ("/a/b/0").
 # OAuth, token refresh, request bodies and pagination are NOT supported — a
 # static key in one header is the whole contract. Not in the Waybar widget's
-# `--vendor` list, the TUI Settings overlay, `[ui] primary`, or `vendors`.
+# `--vendor` list, `[ui] primary`, or `vendors`; in the TUI Settings overlay
+# they appear only as Dashboard-provider checkboxes (`[ui] active_custom`),
+# with no editable credential field.
 # [[custom]]
 # id = "mytool"                  # [a-z0-9][a-z0-9_-]{0,31}; unique; not a built-in name
 # name = "My Tool"               # display name, up to 48 chars; defaults to id

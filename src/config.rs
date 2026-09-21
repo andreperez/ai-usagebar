@@ -82,6 +82,10 @@ pub struct UiConfig {
     /// deliberate choice that disables automatic provider fetches while
     /// retaining explicit `--vendor` fetches.
     pub active_vendors: Option<Vec<VendorId>>,
+    /// The `[[custom]]` counterpart of `active_vendors`, keyed by custom
+    /// provider `id` in config order. `None` → every enabled custom provider;
+    /// `Some(list)` → only the listed ids that are also enabled.
+    pub active_custom: Option<Vec<String>>,
     /// Which vendors the Overview shows (the TUI's first tab and the macOS
     /// menu-bar's top section), in this order. `None` → every active vendor,
     /// in the canonical order.
@@ -1909,6 +1913,22 @@ impl Config {
         }
     }
 
+    /// `[[custom]]` provider ids in the automatic fetch/display scope. Same
+    /// None-means-everything semantics as [`Self::active_vendors`], intersected
+    /// with the enabled custom providers so a deleted or disabled entry cannot
+    /// linger as a phantom tab.
+    pub fn active_customs(&self) -> Vec<String> {
+        let available: Vec<String> = self.enabled_custom().map(|c| c.id.clone()).collect();
+        match &self.ui.active_custom {
+            None => available,
+            Some(selected) => selected
+                .iter()
+                .filter(|id| available.contains(id))
+                .cloned()
+                .collect(),
+        }
+    }
+
     /// Validate cross-entry constraints that serde cannot express. Account
     /// labels are both CLI selectors and TUI tab identities, so duplicates
     /// would make either destination ambiguous.
@@ -1920,6 +1940,16 @@ impl Config {
                     return Err(AppError::Other(format!(
                         "[ui] active_vendors contains duplicate vendor {:?}",
                         vendor.slug()
+                    )));
+                }
+            }
+        }
+        if let Some(active) = &self.ui.active_custom {
+            let mut seen = HashSet::new();
+            for id in active {
+                if !seen.insert(id) {
+                    return Err(AppError::Other(format!(
+                        "[ui] active_custom contains duplicate provider {id:?}"
                     )));
                 }
             }
@@ -3146,6 +3176,43 @@ enabled = false
             error
                 .to_string()
                 .contains("active_vendors contains duplicate")
+        );
+    }
+
+    #[test]
+    fn active_customs_preserve_legacy_fallback_or_apply_explicit_selection() {
+        let second = custom_with(r#"id = "mytool""#, r#"id = "off""#)
+            .replace(r#"short_name = "myt""#, r#"short_name = "off""#)
+            .replace("enabled = true", "enabled = false");
+        let toml = format!("{CUSTOM_BLOCK}{second}");
+
+        let config = Config::load_from(write_toml(&toml).path()).unwrap();
+        assert!(config.ui.active_custom.is_none());
+        assert_eq!(config.active_customs(), vec!["mytool".to_string()]);
+
+        // Explicit order wins; ids outside the enabled set are dropped.
+        let config = Config::load_from(
+            write_toml(format!("[ui]\nactive_custom = [\"mytool\", \"ghost\"]\n{toml}").as_str())
+                .path(),
+        )
+        .unwrap();
+        assert_eq!(config.active_customs(), vec!["mytool".to_string()]);
+
+        let config = Config::load_from(
+            write_toml(format!("[ui]\nactive_custom = []\n{toml}").as_str()).path(),
+        )
+        .unwrap();
+        assert!(config.active_customs().is_empty());
+    }
+
+    #[test]
+    fn duplicate_active_custom_are_rejected() {
+        let file = write_toml("[ui]\nactive_custom = [\"mytool\", \"mytool\"]\n");
+        let error = Config::load_from(file.path()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("active_custom contains duplicate")
         );
     }
 
