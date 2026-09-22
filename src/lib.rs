@@ -51,6 +51,7 @@ pub mod pacing;
 pub mod pango;
 pub mod process;
 pub mod report;
+pub mod request_log;
 pub mod safe_storage;
 pub mod serde_helpers;
 pub mod supergrok;

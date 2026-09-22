@@ -136,11 +136,13 @@ async fn fetch_live(
 ) -> Result<DeepseekSnapshot> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Accept", "application/json")
-            .send(),
+        crate::request_log::send(
+            "deepseek",
+            client
+                .get(url)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Accept", "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("deepseek timeout: {url}")))??;

@@ -170,10 +170,12 @@ async fn fetch_live(
 ) -> Result<MoonshotSnapshot> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(&endpoints.balance)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .send(),
+        crate::request_log::send(
+            "moonshot",
+            client
+                .get(&endpoints.balance)
+                .header("Authorization", format!("Bearer {api_key}")),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("moonshot timeout: {}", endpoints.balance)))??;

@@ -305,18 +305,20 @@ async fn usage_call(
 ) -> Result<reqwest::Response> {
     tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .post(&endpoints.usage)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("Connect-Protocol-Version", "1")
-            .header("x-cursor-client-type", "sand")
-            .header("x-cursor-client-version", "0.1.0")
-            .header("x-sand-box-namespace", "prod")
-            .header("x-ghost-mode", "true")
-            .header("x-request-id", request_id())
-            .body("{}")
-            .send(),
+        crate::request_log::send(
+            "grokbot",
+            client
+                .post(&endpoints.usage)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("Connect-Protocol-Version", "1")
+                .header("x-cursor-client-type", "sand")
+                .header("x-cursor-client-version", "0.1.0")
+                .header("x-sand-box-namespace", "prod")
+                .header("x-ghost-mode", "true")
+                .header("x-request-id", request_id())
+                .body("{}"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("grokbot timeout: {}", endpoints.usage)))?
@@ -361,10 +363,13 @@ async fn refresh(
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
     });
-    let resp = tokio::time::timeout(REFRESH_TIMEOUT, client.post(token_url).json(&body).send())
-        .await
-        .map_err(|_| AppError::Transport(format!("grokbot token refresh timeout: {token_url}")))?
-        .map_err(|e| AppError::Transport(format!("grokbot token refresh: {e}")))?;
+    let resp = tokio::time::timeout(
+        REFRESH_TIMEOUT,
+        crate::request_log::send("grokbot", client.post(token_url).json(&body)),
+    )
+    .await
+    .map_err(|_| AppError::Transport(format!("grokbot token refresh timeout: {token_url}")))?
+    .map_err(|e| AppError::Transport(format!("grokbot token refresh: {e}")))?;
     if !resp.status().is_success() {
         return Err(AppError::Credentials(
             "Grok Bot token refresh was rejected; sign in to the Grok Bot desktop app again".into(),

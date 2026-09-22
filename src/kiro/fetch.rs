@@ -349,13 +349,15 @@ async fn fetch_live(
 
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .post(&endpoints.usage_limits)
-            .header("Content-Type", "application/x-amz-json-1.0")
-            .header("x-amz-target", REQUEST_TARGET)
-            .header("Authorization", format!("Bearer {access_token}"))
-            .json(&body)
-            .send(),
+        crate::request_log::send(
+            "kiro",
+            client
+                .post(&endpoints.usage_limits)
+                .header("Content-Type", "application/x-amz-json-1.0")
+                .header("x-amz-target", REQUEST_TARGET)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .json(&body),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("kiro timeout: {}", endpoints.usage_limits)))??;

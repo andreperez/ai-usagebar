@@ -904,6 +904,37 @@ make smoke                                         # runs all ignored tests; onl
 make clippy                                        # cargo clippy -D warnings
 ```
 
+### See which requests a run actually made
+
+Set `AI_USAGEBAR_LOG_REQUESTS=1` before launching the binary to append every
+outbound request to `ai-usagebar-requests.log` in the system temp directory
+(`$env:TEMP` on Windows PowerShell, `$TMPDIR` elsewhere):
+
+```bash
+AI_USAGEBAR_LOG_REQUESTS=1 ai-usagebar --vendor zai
+```
+
+```powershell
+$env:AI_USAGEBAR_LOG_REQUESTS = "1"
+ai-usagebar --vendor zai
+```
+
+Only the exact value `1` enables the log; `0`, an empty value, and an unset
+variable leave it off. The TUI and tray read the setting when they start, so
+restart either process after changing it.
+
+Each run opens with a `run pid=…` header, then one `request` line per attempt
+(vendor, method, fixed-provider `scheme://host/path`) and one `response` line
+per outcome (`status=200`, or a classified `error=timeout|connect|…`). Query
+strings are dropped. A custom provider logs only `scheme://host[:port]`, so a
+token in its user-supplied path or query never reaches the file.
+
+The header is written even when the run reaches nothing, which is what makes a
+run with no `request` lines proof it made no request — rather than a run that
+never happened. It answers two questions a cache cannot: whether a figure came
+from the network or from the cache, and whether a provider you left unchecked
+in Settings issued any request at all.
+
 ## TUI controls
 
 ![ai-usagebar-tui showing the Codex tab — 5h and weekly gauges, Credits block with message-count ranges, tabs at top, key hints in the footer](screenshots/tui-openai.png)

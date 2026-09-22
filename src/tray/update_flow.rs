@@ -54,13 +54,15 @@ pub async fn check_at(
     url: &str,
     current_version: &str,
 ) -> Result<Option<Release>, String> {
-    let response = client
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .await
-        .map_err(|e| format!("release check failed: {e}"))?;
+    let response = crate::request_log::send(
+        "self-update",
+        client
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .timeout(REQUEST_TIMEOUT),
+    )
+    .await
+    .map_err(|e| format!("release check failed: {e}"))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("release check returned HTTP {}", status.as_u16()));
@@ -127,9 +129,7 @@ async fn fetch_bytes(client: &reqwest::Client, url: &str, cap: u64) -> Result<Ve
     if !url.starts_with("https://") {
         return Err("refusing a non-HTTPS download".into());
     }
-    let response = client
-        .get(url)
-        .send()
+    let response = crate::request_log::send("self-update", client.get(url))
         .await
         .map_err(|e| format!("download failed: {e}"))?;
     let status = response.status();

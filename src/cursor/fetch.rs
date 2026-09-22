@@ -249,16 +249,18 @@ async fn fetch_live(
     // browser-ish headers get past its CORS gate.
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(&endpoints.summary)
-            .header(
-                "Cookie",
-                format!("WorkosCursorSessionToken={}", auth.cookie_value),
-            )
-            .header("Origin", BASE_URL)
-            .header("Referer", format!("{BASE_URL}/dashboard"))
-            .header("User-Agent", BROWSER_UA)
-            .send(),
+        crate::request_log::send(
+            "cursor",
+            client
+                .get(&endpoints.summary)
+                .header(
+                    "Cookie",
+                    format!("WorkosCursorSessionToken={}", auth.cookie_value),
+                )
+                .header("Origin", BASE_URL)
+                .header("Referer", format!("{BASE_URL}/dashboard"))
+                .header("User-Agent", BROWSER_UA),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("cursor timeout: {}", endpoints.summary)))??;

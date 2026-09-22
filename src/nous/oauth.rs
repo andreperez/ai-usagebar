@@ -116,13 +116,15 @@ pub async fn request_device_code(
     client: &reqwest::Client,
     endpoints: &Endpoints,
 ) -> Result<DeviceCode, OAuthError> {
-    let response = client
-        .post(&endpoints.device_code)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .form(&[("client_id", CLIENT_ID), ("scope", SCOPE)])
-        .send()
-        .await
-        .map_err(|_| OAuthError::Transport)?;
+    let response = crate::request_log::send(
+        "nous",
+        client
+            .post(&endpoints.device_code)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .form(&[("client_id", CLIENT_ID), ("scope", SCOPE)]),
+    )
+    .await
+    .map_err(|_| OAuthError::Transport)?;
     let status = response.status();
     if !status.is_success() {
         return Err(OAuthError::HttpStatus(status.as_u16()));
@@ -197,17 +199,19 @@ async fn poll_request(
     endpoint: &str,
     device_code: &str,
 ) -> Result<(u16, Value), OAuthError> {
-    let response = client
-        .post(endpoint)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .form(&[
-            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-            ("client_id", CLIENT_ID),
-            ("device_code", device_code),
-        ])
-        .send()
-        .await
-        .map_err(|_| OAuthError::Transport)?;
+    let response = crate::request_log::send(
+        "nous",
+        client
+            .post(endpoint)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .form(&[
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ("client_id", CLIENT_ID),
+                ("device_code", device_code),
+            ]),
+    )
+    .await
+    .map_err(|_| OAuthError::Transport)?;
     let status = response.status().as_u16();
     let body = crate::vendor::read_body_capped(response, crate::vendor::MAX_BODY_BYTES)
         .await
@@ -224,18 +228,20 @@ pub async fn refresh_access_token(
     if refresh_token.trim().is_empty() {
         return Err(OAuthError::Credentials);
     }
-    let response = client
-        .post(endpoint)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("x-nous-refresh-token", refresh_token)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", CLIENT_ID),
-            ("refresh_token", refresh_token),
-        ])
-        .send()
-        .await
-        .map_err(|_| OAuthError::Transport)?;
+    let response = crate::request_log::send(
+        "nous",
+        client
+            .post(endpoint)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .header("x-nous-refresh-token", refresh_token)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLIENT_ID),
+                ("refresh_token", refresh_token),
+            ]),
+    )
+    .await
+    .map_err(|_| OAuthError::Transport)?;
     let status = response.status();
     if !status.is_success() {
         // Portal uses 400 for an expired, revoked, reused, or otherwise invalid

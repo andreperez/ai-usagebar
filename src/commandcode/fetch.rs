@@ -144,12 +144,14 @@ async fn get_json(
 ) -> Result<Value> {
     let response = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .bearer_auth(token)
-            .query(query)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send(),
+        crate::request_log::send(
+            "commandcode",
+            client
+                .get(url)
+                .bearer_auth(token)
+                .query(query)
+                .header(reqwest::header::ACCEPT, "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport("Command Code request timed out".to_string()))??;

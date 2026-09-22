@@ -184,10 +184,12 @@ async fn fetch_one<T: for<'de> serde::Deserialize<'de>>(
 ) -> Result<T> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .send(),
+        crate::request_log::send(
+            "openrouter",
+            client
+                .get(url)
+                .header("Authorization", format!("Bearer {api_key}")),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("openrouter timeout: {url}")))??;

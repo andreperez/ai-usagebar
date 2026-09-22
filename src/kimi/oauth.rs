@@ -257,16 +257,18 @@ pub async fn refresh(
     client_id: &str,
     refresh_token: &str,
 ) -> Result<RefreshResponse> {
-    let resp = client
-        .post(endpoint)
-        .header("Accept", "application/json")
-        .form(&[
-            ("client_id", client_id),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-        ])
-        .send()
-        .await?;
+    let resp = crate::request_log::send(
+        "kimi",
+        client
+            .post(endpoint)
+            .header("Accept", "application/json")
+            .form(&[
+                ("client_id", client_id),
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ]),
+    )
+    .await?;
 
     let status = resp.status();
     let body = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES).await?;

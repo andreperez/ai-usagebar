@@ -137,12 +137,14 @@ pub async fn refresh(
         refresh_token,
     };
 
-    let resp = client
-        .post(endpoint)
-        .header("Content-Type", "application/json")
-        .json(&req)
-        .send()
-        .await?;
+    let resp = crate::request_log::send(
+        "kiro",
+        client
+            .post(endpoint)
+            .header("Content-Type", "application/json")
+            .json(&req),
+    )
+    .await?;
 
     let status = resp.status();
     let body = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES).await?;

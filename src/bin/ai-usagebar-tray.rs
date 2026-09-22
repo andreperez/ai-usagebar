@@ -4,5 +4,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
+    ai_usagebar::request_log::begin_run();
     std::process::exit(ai_usagebar::tray::run());
 }

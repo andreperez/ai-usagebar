@@ -200,10 +200,12 @@ async fn get_json<T: for<'de> serde::Deserialize<'de>>(
 ) -> Result<T> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", format!("Bearer {key}"))
-            .send(),
+        crate::request_log::send(
+            "grok",
+            client
+                .get(url)
+                .header("Authorization", format!("Bearer {key}")),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("grok timeout: {url}")))??;

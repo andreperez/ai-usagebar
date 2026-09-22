@@ -27,6 +27,7 @@ fn main() {
         }
         ai_usagebar::config::set_override_path(path);
     }
+    ai_usagebar::request_log::begin_run();
     if let Some(Command::Account { action }) = &cli.command {
         std::process::exit(ai_usagebar::account::run(action));
     }

@@ -91,15 +91,17 @@ async fn fetch_live(
 ) -> Result<Snapshot> {
     let response = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(&endpoints.user)
-            .header(reqwest::header::AUTHORIZATION, format!("token {token}"))
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header("Editor-Version", "vscode/1.96.2")
-            .header("Editor-Plugin-Version", "copilot-chat/0.26.7")
-            .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7")
-            .header("X-GitHub-Api-Version", "2025-04-01")
-            .send(),
+        crate::request_log::send(
+            "copilot",
+            client
+                .get(&endpoints.user)
+                .header(reqwest::header::AUTHORIZATION, format!("token {token}"))
+                .header(reqwest::header::ACCEPT, "application/json")
+                .header("Editor-Version", "vscode/1.96.2")
+                .header("Editor-Plugin-Version", "copilot-chat/0.26.7")
+                .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7")
+                .header("X-GitHub-Api-Version", "2025-04-01"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport("GitHub Copilot request timed out".into()))??;

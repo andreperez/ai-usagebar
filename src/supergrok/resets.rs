@@ -44,16 +44,18 @@ async fn fetch_with(auth_path: &Path, url: &str) -> Result<ResetCredits> {
         .redirect(same_origin_redirect_policy())
         .build()
         .map_err(|_| AppError::Other("failed to build the Grok reset HTTP client".into()))?;
-    let response = client
-        .post(url)
-        .header("Authorization", format!("Bearer {key}"))
-        .header("Content-Type", "application/grpc-web+proto")
-        .header("x-grpc-web", "1")
-        .header("Origin", "https://grok.com")
-        .body(vec![0; 5])
-        .send()
-        .await
-        .map_err(|e| AppError::Transport(format!("Grok reset request failed: {e}")))?;
+    let response = crate::request_log::send(
+        "supergrok",
+        client
+            .post(url)
+            .header("Authorization", format!("Bearer {key}"))
+            .header("Content-Type", "application/grpc-web+proto")
+            .header("x-grpc-web", "1")
+            .header("Origin", "https://grok.com")
+            .body(vec![0; 5]),
+    )
+    .await
+    .map_err(|e| AppError::Transport(format!("Grok reset request failed: {e}")))?;
     let status = response.status();
     let bytes = read_body_capped(response, MAX_BODY_BYTES).await?;
     if !status.is_success() {

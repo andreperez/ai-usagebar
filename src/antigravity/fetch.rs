@@ -564,7 +564,9 @@ fn account_key(user_status: &serde_json::Value) -> String {
 /// `agy` CLI serves no such page, so a missing token is recorded as `None` and
 /// its precise rejection is classified after the RPC probe.
 async fn fetch_csrf(client: &reqwest::Client, base: &str) -> Option<String> {
-    let resp = client.get(base).timeout(HTTP_TIMEOUT).send().await.ok()?;
+    let resp = crate::request_log::send("antigravity", client.get(base).timeout(HTTP_TIMEOUT))
+        .await
+        .ok()?;
     // Bounded like every other response this crate reads: a local server is
     // still an untrusted source of unbounded bytes.
     let bytes = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES)
@@ -592,7 +594,7 @@ async fn post_rpc(
     if let Some(token) = csrf {
         req = req.header("x-codeium-csrf-token", token);
     }
-    let resp = req.send().await?;
+    let resp = crate::request_log::send("antigravity", req).await?;
 
     let status = resp.status();
     // Cap error bodies too. A local endpoint is still untrusted, and reading a

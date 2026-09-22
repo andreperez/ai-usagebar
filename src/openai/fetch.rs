@@ -237,7 +237,7 @@ fn authorized(client: &reqwest::Client, url: String, t: &Tokens) -> reqwest::Req
 /// `credits` array is our typed projection — status + expiry, never the
 /// redemption `id`.
 async fn fetch_usage(client: &reqwest::Client, url: &str, t: &Tokens) -> Result<UsageResponse> {
-    let resp = authorized(client, url.to_string(), t).send().await?;
+    let resp = crate::request_log::send("openai", authorized(client, url.to_string(), t)).await?;
     let status = resp.status();
     let bytes = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES).await?;
 
@@ -286,9 +286,11 @@ async fn fetch_reset_credits(
     t: &Tokens,
 ) -> Result<super::types::ResetCreditsBlock> {
     let base = usage_url.strip_suffix("/usage").unwrap_or(usage_url);
-    let resp = authorized(client, format!("{base}/rate-limit-reset-credits"), t)
-        .send()
-        .await?;
+    let resp = crate::request_log::send(
+        "openai",
+        authorized(client, format!("{base}/rate-limit-reset-credits"), t),
+    )
+    .await?;
     let status = resp.status();
     let bytes = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES).await?;
     if !status.is_success() {

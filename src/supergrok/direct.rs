@@ -36,13 +36,15 @@ pub async fn fetch_billing_with(auth_path: &Path, base_url: &str) -> Result<Bill
         .redirect(same_origin_redirect_policy())
         .build()
         .map_err(|_| AppError::Other("failed to build the Grok billing HTTP client".into()))?;
-    let resp = client
-        .get(format!("{base_url}/v1/billing?format=credits"))
-        .header("X-XAI-Token-Auth", TOKEN_AUTH_HEADER)
-        .header("Authorization", format!("Bearer {key}"))
-        .send()
-        .await
-        .map_err(|e| AppError::Transport(format!("Grok billing request failed: {e}")))?;
+    let resp = crate::request_log::send(
+        "supergrok",
+        client
+            .get(format!("{base_url}/v1/billing?format=credits"))
+            .header("X-XAI-Token-Auth", TOKEN_AUTH_HEADER)
+            .header("Authorization", format!("Bearer {key}")),
+    )
+    .await
+    .map_err(|e| AppError::Transport(format!("Grok billing request failed: {e}")))?;
 
     let status = resp.status();
     let bytes = read_body_capped(resp, MAX_BODY_BYTES).await?;

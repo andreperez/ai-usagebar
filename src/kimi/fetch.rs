@@ -360,11 +360,13 @@ async fn bearer_token(
 async fn plan_label(client: &reqwest::Client, url: &str, token: &str) -> Option<String> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("Accept", "application/json")
-            .send(),
+        crate::request_log::send(
+            "kimi",
+            client
+                .get(url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/json"),
+        ),
     )
     .await
     .ok()?
@@ -394,11 +396,13 @@ async fn fetch_live(
     let (usages, label) = tokio::join!(
         tokio::time::timeout(
             HTTP_TIMEOUT,
-            client
-                .get(url)
-                .header("Authorization", format!("Bearer {token}"))
-                .header("Accept", "application/json")
-                .send(),
+            crate::request_log::send(
+                "kimi",
+                client
+                    .get(url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Accept", "application/json"),
+            ),
         ),
         plan_label(client, &endpoints.me, &token),
     );

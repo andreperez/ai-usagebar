@@ -297,16 +297,18 @@ fn with_oauth_plan<T>(plan_label: &str, result: Result<T>) -> Result<T> {
 }
 
 async fn fetch_usage(client: &reqwest::Client, url: &str, creds: &OauthCreds) -> Result<Vec<u8>> {
-    let resp = client
-        .get(url)
-        .header("Authorization", format!("Bearer {}", creds.access_token))
-        .header("anthropic-beta", USAGE_BETA_HEADER)
-        // These four headers are exactly what the endpoint accepts — the
-        // `User-Agent` is load-bearing (without it the endpoint 429s hard).
-        .header("User-Agent", USAGE_USER_AGENT)
-        .header("Content-Type", "application/json")
-        .send()
-        .await?;
+    let resp = crate::request_log::send(
+        "anthropic",
+        client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", creds.access_token))
+            .header("anthropic-beta", USAGE_BETA_HEADER)
+            // These four headers are exactly what the endpoint accepts — the
+            // `User-Agent` is load-bearing (without it the endpoint 429s hard).
+            .header("User-Agent", USAGE_USER_AGENT)
+            .header("Content-Type", "application/json"),
+    )
+    .await?;
 
     let status = resp.status();
     let bytes = crate::vendor::read_body_capped(resp, crate::vendor::MAX_BODY_BYTES).await?;

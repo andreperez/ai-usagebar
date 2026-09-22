@@ -207,10 +207,12 @@ async fn fetch_live(
 ) -> Result<MinimaxSnapshot> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(&endpoints.remains)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .send(),
+        crate::request_log::send(
+            "minimax",
+            client
+                .get(&endpoints.remains)
+                .header("Authorization", format!("Bearer {api_key}")),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("minimax timeout: {}", endpoints.remains)))??;

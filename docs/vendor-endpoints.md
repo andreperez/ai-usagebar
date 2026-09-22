@@ -112,3 +112,45 @@ cargo test --test live kimi_live -- --ignored --nocapture
 
 The tests validate the fields used by ai-usagebar and report which part of a
 response changed.
+
+## See which requests a run actually made
+
+The tables above say which endpoints a vendor *can* call. To see which ones a
+particular run *did* call, set `AI_USAGEBAR_LOG_REQUESTS=1` before launching
+the binary:
+
+```bash
+AI_USAGEBAR_LOG_REQUESTS=1 ai-usagebar --vendor zai
+```
+
+```powershell
+$env:AI_USAGEBAR_LOG_REQUESTS = "1"
+ai-usagebar --vendor zai
+```
+
+Only the exact value `1` enables the log; `0`, an empty value, and an unset
+variable leave it off. The TUI and tray read the setting when they start, so
+restart either process after changing it.
+
+Every outbound request — usage fetches, OAuth refreshes, even the tray's own
+update check — appends to `ai-usagebar-requests.log` in the system temp
+directory (`$env:TEMP` on Windows PowerShell, `$TMPDIR` elsewhere):
+
+```text
+2026-09-22T02:55:01.130Z run pid=3312 version=1.20.2
+2026-09-22T02:55:01.138Z request vendor=zai method=GET target=https://api.z.ai/api/monitor/usage/quota/limit
+2026-09-22T02:55:01.245Z response vendor=zai status=200
+```
+
+The `run` header carries the pid, so two runs appended to the same file stay
+apart. A fixed-provider target is scheme, host, port and path, with the query
+string dropped. A custom-provider target is only scheme, host, and port:
+either its configured path or query can be a token. Transport failures are
+recorded as a kind (`error=timeout`, `error=connect`, …) rather than in the
+error's own words, which embed the URL.
+
+The header is written before any request is attempted, so a run that reaches
+nothing still announces itself. A request absent from a run's section is a
+request that did not happen — which is how to confirm that a provider left out
+of `ui.active_vendors` / `ui.active_custom` issued none, and that a figure on
+screen came from the cache instead of the network.

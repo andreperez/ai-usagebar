@@ -149,7 +149,7 @@ async fn fetch_live(
         req = req.header("x-kilocode-organizationid", org);
     }
 
-    let resp = tokio::time::timeout(HTTP_TIMEOUT, req.send())
+    let resp = tokio::time::timeout(HTTP_TIMEOUT, crate::request_log::send("kilo", req))
         .await
         .map_err(|_| AppError::Transport(format!("kilo timeout: {}", endpoints.balance)))??;
 

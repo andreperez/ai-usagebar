@@ -122,16 +122,18 @@ async fn post_json(
     access_token: &str,
     user_agent: &str,
 ) -> std::result::Result<reqwest::Response, reqwest::Error> {
-    client
-        .post(url)
-        .timeout(HTTP_TIMEOUT)
-        .header("Authorization", format!("Bearer {access_token}"))
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("User-Agent", user_agent)
-        .body("{}")
-        .send()
-        .await
+    crate::request_log::send(
+        "antigravity",
+        client
+            .post(url)
+            .timeout(HTTP_TIMEOUT)
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("User-Agent", user_agent)
+            .body("{}"),
+    )
+    .await
 }
 
 /// Ask each quota base in turn for the user's quota summary. The raw JSON is
@@ -282,13 +284,15 @@ pub async fn refresh(
         ("client_id", oauth.id.as_str()),
         ("client_secret", oauth.secret.as_str()),
     ];
-    let resp = client
-        .post(token_url)
-        .timeout(HTTP_TIMEOUT)
-        .header("Accept", "application/json")
-        .form(&form)
-        .send()
-        .await?;
+    let resp = crate::request_log::send(
+        "antigravity",
+        client
+            .post(token_url)
+            .timeout(HTTP_TIMEOUT)
+            .header("Accept", "application/json")
+            .form(&form),
+    )
+    .await?;
     let status = resp.status();
     let body = read_body_capped(resp, MAX_BODY_BYTES).await?;
     if !status.is_success() {

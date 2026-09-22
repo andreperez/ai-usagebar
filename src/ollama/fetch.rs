@@ -102,11 +102,13 @@ fn fallback_with_error(
 async fn fetch_live(client: &reqwest::Client, url: &str, api_key: &str) -> Result<(Vec<u8>, Body)> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Accept", "application/json")
-            .send(),
+        crate::request_log::send(
+            "ollama",
+            client
+                .get(url)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Accept", "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("ollama timeout: {url}")))??;

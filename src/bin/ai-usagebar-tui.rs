@@ -39,6 +39,7 @@ async fn main() {
         eprintln!("ai-usagebar-tui: {message}");
         std::process::exit(2);
     }
+    ai_usagebar::request_log::begin_run();
     if let Err(e) = run().await {
         eprintln!("ai-usagebar-tui: {e}");
         std::process::exit(1);

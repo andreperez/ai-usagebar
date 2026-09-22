@@ -126,11 +126,13 @@ async fn fetch_live(
 ) -> Result<BalanceData> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(&endpoints.balance)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Content-Type", "application/json")
-            .send(),
+        crate::request_log::send(
+            "novita",
+            client
+                .get(&endpoints.balance)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Content-Type", "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("novita timeout: {}", endpoints.balance)))??;

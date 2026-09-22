@@ -111,7 +111,7 @@ async fn fetch_live(
 
     // The timeout message deliberately omits the URL: a user may have put a
     // query-string token in it, and this string ends up in `.last_error`.
-    let resp = tokio::time::timeout(HTTP_TIMEOUT, request.send())
+    let resp = tokio::time::timeout(HTTP_TIMEOUT, crate::request_log::send_custom(id, request))
         .await
         .map_err(|_| AppError::Transport(format!("custom {id}: request timed out")))??;
 

@@ -292,6 +292,14 @@ vendor's response shape drifts:
 - `src/context/` — opt-in, bounded reader for local Claude Code JSONL
   transcripts. This format is best-effort and schema-tolerant; tests must use
   `scan_dir(&Path)` with a temp directory and never inspect a real user history.
+- `src/request_log.rs` — opt-in outbound request log
+  (`AI_USAGEBAR_LOG_REQUESTS=1`): a `run` header per process, then one line per
+  attempt and per outcome. Fixed providers omit query strings; custom providers
+  log only their origin because their configured path can be a credential.
+  Every vendor request goes through `request_log`, and a guard test fails on a
+  bare `.send()` anywhere else — a module that opens its own connection is
+  invisible to the log, which is the only way to tell a live read from a cache
+  hit.
 - `src/tui/settings.rs` — Settings overlay (toml_edit-backed,
   auto-signals waybar after save)
 - `src/tui/panels.rs` — native ratatui per-vendor panels

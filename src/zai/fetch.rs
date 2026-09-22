@@ -118,12 +118,14 @@ async fn fetch_live(
 ) -> Result<(Vec<u8>, Envelope)> {
     let resp = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .header("Authorization", api_key) // NO `Bearer ` prefix.
-            .header("Accept-Language", "en-US,en")
-            .header("Content-Type", "application/json")
-            .send(),
+        crate::request_log::send(
+            "zai",
+            client
+                .get(url)
+                .header("Authorization", api_key) // NO `Bearer ` prefix.
+                .header("Accept-Language", "en-US,en")
+                .header("Content-Type", "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport(format!("zai timeout: {url}")))??;

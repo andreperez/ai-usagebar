@@ -76,13 +76,15 @@ pub async fn fetch_account(
     if access_token.trim().is_empty() {
         return Err(FetchError::Authentication);
     }
-    let response = client
-        .get(&endpoints.account)
-        .bearer_auth(access_token)
-        .header("accept", "application/json")
-        .send()
-        .await
-        .map_err(|_| FetchError::Transport)?;
+    let response = crate::request_log::send(
+        "nous",
+        client
+            .get(&endpoints.account)
+            .bearer_auth(access_token)
+            .header("accept", "application/json"),
+    )
+    .await
+    .map_err(|_| FetchError::Transport)?;
     let status = response.status();
     let body = crate::vendor::read_body_capped(response, crate::vendor::MAX_BODY_BYTES)
         .await

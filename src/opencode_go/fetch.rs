@@ -91,11 +91,13 @@ pub async fn fetch_snapshot(
 async fn fetch_live(client: &reqwest::Client, url: &str, api_key: &str) -> Result<Usage> {
     let response = tokio::time::timeout(
         HTTP_TIMEOUT,
-        client
-            .get(url)
-            .bearer_auth(api_key)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send(),
+        crate::request_log::send(
+            "opencode-go",
+            client
+                .get(url)
+                .bearer_auth(api_key)
+                .header(reqwest::header::ACCEPT, "application/json"),
+        ),
     )
     .await
     .map_err(|_| AppError::Transport("OpenCode Go request timed out".to_string()))??;

@@ -190,6 +190,10 @@ enabled = true             # disabled by default; enable once you've run `kiro-c
 # db_path = "/home/you/.local/share/kiro-cli/data.sqlite3"
 ```
 
+To confirm that the providers you have not listed make no request at all, run
+with `AI_USAGEBAR_LOG_REQUESTS=1` and read the request log — see
+[vendor endpoints](vendor-endpoints.md#see-which-requests-a-run-actually-made).
+
 For more than one OpenRouter key, see the
 [OpenRouter account guide](openrouter-accounts.md). The existing singular
 `[openrouter]` key remains the default account and needs no migration.

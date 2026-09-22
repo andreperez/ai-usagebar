@@ -258,11 +258,12 @@ async fn fetch_live(
             req = req.query(&[("page", p.as_str())]);
         }
 
-        let resp = tokio::time::timeout(HTTP_TIMEOUT, req.send())
-            .await
-            .map_err(|_| {
-                AppError::Transport(format!("anthropic-api timeout: {}", endpoints.cost_report))
-            })??;
+        let resp =
+            tokio::time::timeout(HTTP_TIMEOUT, crate::request_log::send("anthropic_api", req))
+                .await
+                .map_err(|_| {
+                    AppError::Transport(format!("anthropic-api timeout: {}", endpoints.cost_report))
+                })??;
 
         let status = resp.status();
         let bytes = read_body_capped(resp, MAX_BODY_BYTES).await?;
