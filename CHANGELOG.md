@@ -11,6 +11,11 @@ Each release is also published at
 
 ### Added
 
+- The TUI vendor menu is now navigated with the Up/Down arrow keys (wrapping),
+  with `Tab`/`Shift+Tab`/`l`/`h`/`←`/`→` kept as secondary shortcuts. Mouse
+  clicks work in the TUI: click a vendor menu entry to select it, click a
+  footer action to refresh, refresh all, open Settings, or quit, click a
+  Settings field to focus it, or click **Save** to save.
 - **macOS Grok Bot.** `[grokbot]` reads
   `~/Library/Application Support/Grok Bot/sand-secrets.json` with the
   Chromium OSCrypt key from the login Keychain item `Grok Bot Safe Storage`

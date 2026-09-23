@@ -4,12 +4,14 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::Utc;
+use ratatui::layout::Rect;
 use reqwest::Client;
 
 use crate::cache::DEFAULT_TTL;
 use crate::config::{Config, CustomProviderConfig};
 use crate::error::{AppError, Result};
 use crate::theme::Theme;
+use crate::tui::settings::SettingsRow;
 use crate::vendor::{VendorId, VendorOutcome};
 
 /// What we display per vendor — raw snapshot + fetch metadata for native
@@ -248,6 +250,37 @@ fn desktop_profile_labels(_config: &Config) -> Vec<String> {
     Vec::new()
 }
 
+/// Mouse hit-test surface recorded by the last draw and consumed by the event
+/// loop. Draw is the single source of truth for where things are on screen, so
+/// the render pass records the interactive rects here instead of the input
+/// handler re-deriving layout.
+#[derive(Debug, Default, Clone)]
+pub struct HitTargets {
+    /// Vendor navigation entries: Overview first, then each tab by index.
+    pub nav_entries: Vec<(NavTarget, Rect)>,
+    /// Footer actions with a mouse-accessible keyboard equivalent.
+    pub footer_actions: Vec<(FooterAction, Rect)>,
+    /// Settings overlay interactive rows: the primary selector, key fields,
+    /// and save row.
+    pub settings_rows: Vec<(SettingsRow, Rect)>,
+}
+
+/// What a click in the vendor navigation selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavTarget {
+    Overview,
+    Tab(usize),
+}
+
+/// What a click in the footer invokes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FooterAction {
+    Refresh,
+    RefreshAll,
+    Settings,
+    Quit,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub tabs_meta: Vec<TabId>,
@@ -279,6 +312,8 @@ pub struct App {
     pub context: Option<crate::tui::context::ContextState>,
     /// Presentation style for the vendor navigation box (`[ui] vendor_box`).
     pub vendor_box: crate::config::VendorBoxStyle,
+    /// Interactive rects from the most recent draw, for mouse hit-testing.
+    pub hit: std::rc::Rc<std::cell::RefCell<HitTargets>>,
 }
 
 impl App {
@@ -310,6 +345,7 @@ impl App {
             context_generation: 0,
             context: None,
             vendor_box: crate::config::VendorBoxStyle::Sidebar,
+            hit: std::rc::Rc::new(std::cell::RefCell::new(HitTargets::default())),
         }
     }
 
@@ -444,6 +480,27 @@ impl App {
             self.active -= 1;
         } else {
             self.overview = true;
+        }
+    }
+
+    /// Select the Overview pane (mouse click on the first nav entry).
+    pub fn select_overview(&mut self) {
+        self.overview = true;
+    }
+
+    /// Select a vendor tab by index (mouse click on a nav entry).
+    pub fn select_tab(&mut self, index: usize) {
+        if index < self.tabs_meta.len() {
+            self.active = index;
+            self.overview = false;
+        }
+    }
+
+    /// Apply a mouse click on a vendor-navigation entry.
+    pub fn nav_from_target(&mut self, target: NavTarget) {
+        match target {
+            NavTarget::Overview => self.select_overview(),
+            NavTarget::Tab(index) => self.select_tab(index),
         }
     }
 
@@ -1008,6 +1065,34 @@ mod tests {
         assert_eq!(app.active, 0);
         app.prev_tab(); // first vendor -> Overview
         assert!(app.overview);
+    }
+
+    #[test]
+    fn mouse_nav_targets_select_overview_and_tabs() {
+        let mut app = App::with_theme(
+            vec![
+                TabId::vendor(VendorId::Anthropic),
+                TabId::vendor(VendorId::Openai),
+            ],
+            Theme::default(),
+        );
+        app.overview = true;
+        app.nav_from_target(NavTarget::Tab(1));
+        assert!(!app.overview);
+        assert_eq!(app.active, 1);
+        app.nav_from_target(NavTarget::Overview);
+        assert!(app.overview);
+        // Out-of-range tab indices are ignored.
+        app.nav_from_target(NavTarget::Tab(99));
+        assert!(app.overview);
+    }
+
+    #[test]
+    fn hit_targets_default_to_empty() {
+        let app = App::with_theme(Vec::new(), Theme::default());
+        assert!(app.hit.borrow().nav_entries.is_empty());
+        assert!(app.hit.borrow().footer_actions.is_empty());
+        assert!(app.hit.borrow().settings_rows.is_empty());
     }
 
     #[test]

@@ -908,8 +908,11 @@ make clippy                                        # cargo clippy -D warnings
 
 ![ai-usagebar-tui showing the Codex tab — 5h and weekly gauges, Credits block with message-count ranges, tabs at top, key hints in the footer](screenshots/tui-openai.png)
 
-- `Tab` / `l` / `→` — next tab
-- `Shift+Tab` / `h` / `←` — previous tab
+- `↑` / `↓` — move through the vendor menu (wraps; `Tab`/`l`/`→` and
+  `Shift+Tab`/`h`/`←` still work as secondary shortcuts)
+- Mouse — click a vendor menu entry to select it; click the footer's
+  `r`/`R`/`s`/`q`/`Esc` actions to refresh, refresh all, open Settings, or
+  quit; in Settings, click a field to focus it or click **Save** to save
 - `r` — refresh active tab
 - `R` — refresh all tabs
 - `s` — open Settings overlay (primary vendor + API keys)
