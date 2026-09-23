@@ -11,6 +11,15 @@ Each release is also published at
 
 ### Added
 
+- The TUI vendor menu is now navigated with the Up/Down arrow keys (wrapping),
+  with `Tab`/`Shift+Tab`/`l`/`h`/`←`/`→` kept as secondary shortcuts. Mouse
+  clicks work in the TUI: click a vendor menu entry to select it, click a
+  footer action to refresh, refresh all, open Settings, or quit, click a
+  Settings field to focus it, or click **Save** to save.
+- The TUI vendor menu and Overview list only **configured** providers: a
+  provider enabled in config without a key no longer appears as a tab. In the
+  Settings overlay, every key-based provider is listed so it can be configured
+  directly even when no key is present yet.
 - **macOS Grok Bot.** `[grokbot]` reads
   `~/Library/Application Support/Grok Bot/sand-secrets.json` with the
   Chromium OSCrypt key from the login Keychain item `Grok Bot Safe Storage`
@@ -22,6 +31,12 @@ Each release is also published at
 
 ### Fixed
 
+- The `changelog-check` CI guard no longer demands a CHANGELOG section from a
+  tag that never shipped a release. The v1.20.0 tag was abandoned before
+  publishing (its stale manifest was what the new `verify-version` guard
+  caught, as the [1.20.1] section records) and its section was withdrawn in
+  the same release, but the tag itself survived — and no changelog state could
+  satisfy both it and v1.20.1, so every pull request failed the check.
 - **Grok Bot live `usagePercent` and on-demand `enabled`.**
   `GetSandUsageStatus` has been observed sending a fractional JSON number
   (`19.150778`) and `onDemandSettings.enabled: null`. The parser rounds the

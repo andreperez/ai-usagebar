@@ -543,7 +543,7 @@ fn sanitize_section(section: &mut Section) {
 
 /// Translate cache diagnostics at the presentation boundary. Cache files keep
 /// their established `(u16, String)` form: only non-zero codes are HTTP, while
-/// Kimi's stable schema marker identifies its code-zero schema warning.
+/// a stable schema marker identifies a code-zero schema warning.
 fn warning_label(
     snapshot: &VendorSnapshot,
     last_error: &Option<(u16, String)>,
@@ -555,14 +555,16 @@ fn warning_label(
     if message.is_empty() {
         return None;
     }
-    let label = if matches!(snapshot, VendorSnapshot::Kimi(_))
-        && matches!(
-            crate::kimi::vendor::warning_kind(*code, message),
-            crate::kimi::vendor::WarningKind::SchemaDrift
-        ) {
-        "Kimi API schema drift"
-    } else {
-        "Warning"
+    let label = match snapshot {
+        VendorSnapshot::Kimi(_)
+            if matches!(
+                crate::kimi::vendor::warning_kind(*code, message),
+                crate::kimi::vendor::WarningKind::SchemaDrift
+            ) =>
+        {
+            "Kimi API schema drift"
+        }
+        _ => "Warning",
     };
     // The stable marker is already the schema-warning label. Keep the label
     // visible but do not repeat that sentinel as a redundant body value.

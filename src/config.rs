@@ -1814,6 +1814,34 @@ impl Config {
         }
     }
 
+    /// Whether a vendor has a credential the TUI can resolve without fetching.
+    pub fn is_configured(&self, vendor: VendorId) -> bool {
+        let env_or_inline = || {
+            let env = self.api_key_env_for(vendor);
+            (!env.is_empty() && std::env::var(env).is_ok_and(|value| !value.is_empty()))
+                || self.inline_api_key(vendor).is_some()
+        };
+
+        if vendor == VendorId::Openrouter {
+            return env_or_inline()
+                || self.openrouter.accounts.iter().any(|account| {
+                    account
+                        .api_key_env
+                        .as_deref()
+                        .is_some_and(|env| std::env::var(env).is_ok_and(|value| !value.is_empty()))
+                        || account
+                            .api_key
+                            .as_deref()
+                            .is_some_and(|key| !key.is_empty())
+                });
+        }
+
+        match vendor.auth_kind() {
+            crate::vendor::AuthKind::ApiKey => env_or_inline(),
+            crate::vendor::AuthKind::Oauth | crate::vendor::AuthKind::Local => true,
+        }
+    }
+
     /// The environment variable this provider's API key is read from, honoring
     /// a per-vendor `api_key_env` override; `""` for a provider that takes no
     /// key. Matching on [`VendorId`] rather than on a section name is
@@ -2295,6 +2323,36 @@ mod tests {
         assert_eq!(config.opencode_go.api_key_env, "OPENCODE_GO_API_KEY");
         assert!(config.opencode_go.api_key.is_none());
         assert!(!config.is_enabled(VendorId::Copilot));
+    }
+
+    #[test]
+    fn is_configured_follows_inline_keys_and_env() {
+        let mut config = Config::default();
+        // OAuth/local vendors are configured whenever enabled.
+        assert!(config.is_configured(VendorId::Anthropic));
+        assert!(config.is_configured(VendorId::Openai));
+        config.opencode_go.api_key_env = "OPENCODE_GO_TEST_UNSET_ENV".into();
+        assert!(!config.is_configured(VendorId::OpenCodeGo));
+        config.opencode_go.api_key = Some("test-key".into());
+        assert!(config.is_configured(VendorId::OpenCodeGo));
+        config.opencode_go.api_key = None;
+        assert!(!config.is_configured(VendorId::OpenCodeGo));
+    }
+
+    #[test]
+    fn is_configured_counts_openrouter_named_account_keys() {
+        let mut config = Config::default();
+        config.openrouter.api_key_env = "OR_TEST_UNSET_ENV".into();
+        assert!(!config.is_configured(VendorId::Openrouter));
+        config
+            .openrouter
+            .accounts
+            .push(crate::config::OpenRouterAccount {
+                label: "work".into(),
+                api_key_env: None,
+                api_key: Some("sk-work".into()),
+            });
+        assert!(config.is_configured(VendorId::Openrouter));
     }
 
     #[cfg(unix)]
@@ -3942,6 +4000,15 @@ value = "/tier"
             &custom_with(r#"id = "mytool""#, r#"id = "opencode-go""#),
             "is a built-in vendor",
         );
+    }
+
+    #[test]
+    fn custom_accepts_tavily_id_after_native_provider_removal() {
+        let config = Config::load_from(
+            write_toml(&custom_with(r#"id = "mytool""#, r#"id = "tavily""#)).path(),
+        )
+        .unwrap();
+        assert_eq!(config.custom[0].id, "tavily");
     }
 
     #[test]

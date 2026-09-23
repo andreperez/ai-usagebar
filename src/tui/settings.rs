@@ -149,13 +149,19 @@ pub const KEY_VENDORS: &[KeyVendor] = &[
         note: "ollama.com/settings/keys",
     },
 ];
-
 /// Which control has keyboard focus. `Key(i)` indexes into [`KEY_VENDORS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Primary,
     Key(usize),
     Save,
+}
+
+/// An interactive row recorded for mouse hit-testing during the settings draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsRow {
+    /// A focusable control (primary picker, a key field, or the save row).
+    Focus(Focus),
 }
 
 impl Focus {
@@ -357,6 +363,56 @@ impl SettingsState {
             _ => None,
         }
     }
+
+    /// KEY_VENDORS indices currently visible in the focus ring.
+    fn visible_keys(&self) -> Vec<usize> {
+        KEY_VENDORS
+            .iter()
+            .enumerate()
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Move focus forward through the visible ring.
+    fn next_focus(&self) -> Focus {
+        match self.focus {
+            Focus::Primary => match self.visible_keys().first() {
+                Some(&i) => Focus::Key(i),
+                None => Focus::Save,
+            },
+            Focus::Key(i) => {
+                let visible = self.visible_keys();
+                match visible.iter().position(|&v| v == i) {
+                    Some(pos) if pos + 1 < visible.len() => Focus::Key(visible[pos + 1]),
+                    Some(_) => Focus::Save,
+                    None => Focus::Save,
+                }
+            }
+            Focus::Save => match self.visible_keys().first() {
+                Some(&i) => Focus::Key(i),
+                None => Focus::Primary,
+            },
+        }
+    }
+
+    fn prev_focus(&self) -> Focus {
+        let visible = self.visible_keys();
+        match self.focus {
+            Focus::Primary => match visible.last() {
+                Some(&i) => Focus::Key(i),
+                None => Focus::Save,
+            },
+            Focus::Key(i) => match visible.iter().position(|&v| v == i) {
+                Some(0) => Focus::Primary,
+                Some(pos) => Focus::Key(visible[pos - 1]),
+                None => Focus::Primary,
+            },
+            Focus::Save => match visible.last() {
+                Some(&i) => Focus::Key(i),
+                None => Focus::Primary,
+            },
+        }
+    }
 }
 
 /// What the key handler asks the host app to do next.
@@ -408,11 +464,11 @@ pub fn handle_key(state: &mut SettingsState, code: KeyCode, mods: KeyModifiers) 
     }
     match code {
         KeyCode::Tab | KeyCode::Down => {
-            state.focus = state.focus.next();
+            state.focus = state.next_focus();
             return Action::Continue;
         }
         KeyCode::BackTab | KeyCode::Up => {
-            state.focus = state.focus.prev();
+            state.focus = state.prev_focus();
             return Action::Continue;
         }
         _ => {}
@@ -843,7 +899,13 @@ pub fn run_cli(action: &crate::widget::cli::SettingsAction) -> i32 {
 // ─── Render ────────────────────────────────────────────────────────────────
 
 /// Render the modal overlay over `area`.
-pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &SettingsState,
+    theme: &Theme,
+    hits: &mut Vec<(SettingsRow, Rect)>,
+) {
     let modal = centered_rect(74, 88, area);
     f.render_widget(Clear, modal);
 
@@ -858,24 +920,30 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState, theme: &Theme) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
 
-    // — Primary vendor + credentials header —
+    // A row's absolute y is the body top plus its line index (each rendered
+    // line is exactly one row). Recorded alongside each interactive row so a
+    // mouse click can be mapped back to a focus target.
+    let row_at = |line: usize| Rect::new(inner.x, chunks[0].y + line as u16, inner.width, 1);
+
+    // — Primary vendor + API keys header —
     let mut lines: Vec<Line> = vec![
         section_header("Primary vendor", "shown first on the bar / TUI", &bubble),
         primary_line(state, &bubble),
         Line::from(""),
-        section_header(
-            "Credentials",
-            "pick a row, type the credential, then Ctrl-S — Claude & Codex use CLI login",
-            &bubble,
-        ),
+        section_header("API keys", "all key providers", &bubble),
     ];
+    hits.push((SettingsRow::Focus(Focus::Primary), row_at(1)));
+
     for (i, kv) in KEY_VENDORS.iter().enumerate() {
         let focused = state.focus == Focus::Key(i);
+        hits.push((SettingsRow::Focus(Focus::Key(i)), row_at(lines.len())));
         lines.push(key_row(kv, &state.keys[i], focused, &bubble));
     }
+
     lines.push(Line::from(""));
 
     // — Save + status —
+    hits.push((SettingsRow::Focus(Focus::Save), row_at(lines.len())));
     lines.push(save_line(state.focus == Focus::Save, &bubble));
     if !state.status.is_empty() {
         let ok = state.status.starts_with("saved");
