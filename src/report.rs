@@ -988,7 +988,9 @@ mod tests {
         assert!(tabs_matching(&tabs_from_config(&config), "zai").is_empty());
         assert!(tabs_matching(&tabs_from_config(&config), "deepseek").is_empty());
         config.zai.enabled = true;
+        config.zai.api_key = Some("test-key".into());
         config.deepseek.enabled = true;
+        config.deepseek.api_key = Some("test-key".into());
         let tabs = tabs_from_config(&config);
 
         assert_eq!(

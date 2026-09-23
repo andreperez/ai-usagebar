@@ -1,5 +1,5 @@
-//! Interactive TUI — one tab per enabled vendor, plus one extra tab per
-//! configured Anthropic account (`[[anthropic.accounts]]`, issues #14/#17).
+//! Interactive TUI — one tab per configured, enabled vendor, plus one extra tab
+//! per configured Anthropic account (`[[anthropic.accounts]]`, issues #14/#17).
 //!
 //! Controls:
 //!   ↑ / ↓           move through the vendor menu (wraps; mouse clicks work too)

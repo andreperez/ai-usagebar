@@ -151,7 +151,9 @@ impl TabId {
 /// Expand enabled vendors into the tab list. Claude, OpenRouter, and Codex
 /// (OpenAI) yield their default account followed by configured named accounts;
 /// every other vendor is a single tab. With no extra accounts the result equals
-/// `config.enabled_vendors()`, preserving the historical tab set and order.
+/// `config.enabled_vendors()` filtered to configured vendors (a resolvable
+/// credential), preserving the historical tab set and order for the vendors
+/// that are actually usable.
 ///
 /// Config-only and pure — no Desktop profiles. Production uses
 /// [`tabs_with_desktop`]; this stays for the hermetic unit tests and any caller
@@ -182,7 +184,14 @@ pub fn tabs_with_desktop(config: &Config) -> Vec<TabId> {
 fn build_tabs(config: &Config, desktop_labels: &[String]) -> Vec<TabId> {
     let desktop_set: HashSet<&str> = desktop_labels.iter().map(String::as_str).collect();
     let mut tabs = Vec::new();
-    for vendor in config.enabled_vendors() {
+    // Only *configured* providers become tabs: a vendor enabled in config but
+    // without a resolvable credential is not configured, and an unconfigured
+    // provider must not appear in the vendor menu or Overview (REQ-041).
+    for vendor in config
+        .enabled_vendors()
+        .into_iter()
+        .filter(|vendor| config.is_configured(*vendor))
+    {
         if vendor == VendorId::Anthropic {
             let accounts: Vec<_> = config
                 .anthropic
@@ -1172,13 +1181,38 @@ mod tests {
     }
 
     #[test]
-    fn tabs_without_accounts_are_just_enabled_vendors() {
-        // No [[anthropic.accounts]] → one tab per enabled vendor, unchanged.
-        let config = Config::default();
+    fn tabs_are_enabled_vendors_filtered_to_configured() {
+        // No [[anthropic.accounts]] → one tab per enabled vendor that resolves
+        // a credential; an enabled vendor with no key anywhere is not
+        // configured and must not become a tab (REQ-041).
+        let mut config = Config::default();
+        // Give Z.AI an inline key so the expectation does not depend on the
+        // shell's environment.
+        config.zai.api_key = Some("test-key".into());
         let tabs = tabs_from_config(&config);
         let vendors: Vec<VendorId> = tabs.iter().filter_map(TabId::vendor_id).collect();
-        assert_eq!(vendors, config.enabled_vendors());
+        let expected: Vec<VendorId> = config
+            .enabled_vendors()
+            .into_iter()
+            .filter(|vendor| config.is_configured(*vendor))
+            .collect();
+        assert_eq!(vendors, expected);
         assert!(tabs.iter().all(|t| t.account.is_none()));
+
+        // Removing the inline key drops the tab again — unless the shell also
+        // configures Z.AI through the environment, which is outside the test.
+        config.zai.api_key = None;
+        let tabs = tabs_from_config(&config);
+        if std::env::var("ZAI_API_KEY")
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+        {
+            assert!(
+                !tabs
+                    .iter()
+                    .any(|tab| tab.vendor_id() == Some(VendorId::Zai))
+            );
+        }
     }
 
     #[test]
@@ -1234,6 +1268,8 @@ mod tests {
         config.anthropic.enabled = false;
         config.openai.enabled = false;
         config.zai.enabled = false;
+        // Inline base key keeps this test independent of the shell environment.
+        config.openrouter.api_key = Some("test-key".into());
         config.openrouter.show_default_account = false;
         assert_eq!(
             tabs_from_config(&config),
@@ -1589,7 +1625,11 @@ mod tests {
             ..Default::default()
         };
         let tabs = tabs_from_config(&config);
-        let builtin_count = config.enabled_vendors().len();
+        let builtin_count = config
+            .enabled_vendors()
+            .into_iter()
+            .filter(|vendor| config.is_configured(*vendor))
+            .count();
         assert_eq!(tabs.len(), builtin_count + 2);
         assert!(
             tabs[..builtin_count]
@@ -1622,7 +1662,14 @@ mod tests {
             tabs.iter()
                 .all(|t| matches!(t.source, TabSource::Builtin(_)))
         );
-        assert_eq!(tabs.len(), config.enabled_vendors().len());
+        assert_eq!(
+            tabs.len(),
+            config
+                .enabled_vendors()
+                .into_iter()
+                .filter(|vendor| config.is_configured(*vendor))
+                .count()
+        );
     }
 
     #[test]
