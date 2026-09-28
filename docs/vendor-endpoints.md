@@ -117,10 +117,13 @@ response changed.
 
 The tables above say which endpoints a vendor *can* call. To see which ones a
 particular run *did* call, set `AI_USAGEBAR_LOG_REQUESTS=1` before launching
-the binary:
+the binary, or pass `--log-requests` to the widget, TUI, or tray:
 
 ```bash
 AI_USAGEBAR_LOG_REQUESTS=1 ai-usagebar --vendor zai
+ai-usagebar --vendor zai --log-requests
+ai-usagebar-tui --log-requests
+ai-usagebar-tray --log-requests
 ```
 
 ```powershell
@@ -138,16 +141,20 @@ directory (`$env:TEMP` on Windows PowerShell, `$TMPDIR` elsewhere):
 
 ```text
 2026-09-22T02:55:01.130Z run pid=3312 version=1.20.2
-2026-09-22T02:55:01.138Z request vendor=zai method=GET target=https://api.z.ai/api/monitor/usage/quota/limit
-2026-09-22T02:55:01.245Z response vendor=zai status=200
+2026-09-22T02:55:01.138Z request pid=3312 vendor=zai method=GET target=https://api.z.ai/api/monitor/usage/quota/limit
+2026-09-22T02:55:01.245Z response pid=3312 vendor=zai status=200
 ```
 
-The `run` header carries the pid, so two runs appended to the same file stay
-apart. A fixed-provider target is scheme, host, port and path, with the query
-string dropped. A custom-provider target is only scheme, host, and port:
-either its configured path or query can be a token. Transport failures are
-recorded as a kind (`error=timeout`, `error=connect`, …) rather than in the
-error's own words, which embed the URL.
+Every line carries the pid, not only the `run` header. The file sink is
+process-local, so when the widget, TUI and tray all append to the same file
+their lines can interleave; the pid on each line is what keeps a request
+attributable to the run that made it — a before/after comparison groups a line
+under its own pid rather than assuming two runs stay byte-contiguous. A
+fixed-provider target is scheme, host, port and path, with the query string
+dropped. A custom-provider target is only scheme, host, and port: either its
+configured path or query can be a token. Transport failures are recorded as a
+kind (`error=timeout`, `error=connect`, …) rather than in the error's own
+words, which embed the URL.
 
 The header is written before any request is attempted, so a run that reaches
 nothing still announces itself. A request absent from a run's section is a

@@ -191,7 +191,8 @@ enabled = true             # disabled by default; enable once you've run `kiro-c
 ```
 
 To confirm that the providers you have not listed make no request at all, run
-with `AI_USAGEBAR_LOG_REQUESTS=1` and read the request log — see
+with `AI_USAGEBAR_LOG_REQUESTS=1` or pass `--log-requests` to the widget, TUI,
+or tray, then read the request log — see
 [vendor endpoints](vendor-endpoints.md#see-which-requests-a-run-actually-made).
 
 For more than one OpenRouter key, see the
