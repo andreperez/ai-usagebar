@@ -25,7 +25,9 @@ codebase.
 - Native integrations are available for Omarchy, GNOME Shell, KDE Plasma 6,
   the macOS menu bar, and a Windows system-tray popover.
 - One bar item can cycle through enabled providers. `[ui] primary` controls the
-  initial provider in both the widget and TUI.
+  initial provider in both the widget and TUI. Settings checkboxes choose the
+  **active scope** (`[ui] active_vendors` / `active_custom`) so unused providers
+  stay off the bar and are not queried automatically.
 - Atomic caches and file locking prevent duplicate requests from multi-monitor
   Waybar setups.
 - Network failures keep the previous data visible; HTTP errors appear in the
@@ -344,10 +346,16 @@ rather than silently querying the wrong URL.
 
 ### Enabling a vendor
 
-`enabled = true` is what makes a vendor fetch. Anthropic API, GitHub Copilot,
-DeepSeek, Kimi, Kilo, Novita, Moonshot, Grok, SuperGrok, Grok Bot, Antigravity,
-Cursor, MiniMax, and Kiro CLI all default to **disabled** so that existing
-installs are unaffected until you opt in. Use either method:
+**Before**, every `enabled = true` vendor was fetched automatically. A provider
+you never used still appeared in the TUI/widget/tray and still hit its API on
+the refresh interval. **After**, `enabled = true` only makes a vendor
+**eligible**. The widget, TUI and tray query the **active scope** —
+`[ui] active_vendors` (and `[ui] active_custom` for custom providers), set in
+Settings via the active-provider checkboxes. A vendor that is enabled but left
+unchecked is not fetched automatically. Anthropic API, GitHub Copilot, DeepSeek,
+Kimi, Kilo, Novita, Moonshot, Grok, SuperGrok, Grok Bot, Antigravity, Cursor,
+MiniMax, and Kiro CLI all default to **disabled** so that existing installs are
+unaffected until you opt in. Use either method:
 
 - Use the gear or `s` in the Omarchy panel, or run
   `ai-usagebar-tui` and press `s`. Saving a non-empty API key sets that vendor's
@@ -908,10 +916,19 @@ make clippy                                        # cargo clippy -D warnings
 
 Set `AI_USAGEBAR_LOG_REQUESTS=1` before launching the binary to append every
 outbound request to `ai-usagebar-requests.log` in the system temp directory
-(`$env:TEMP` on Windows PowerShell, `$TMPDIR` elsewhere):
+(`$env:TEMP` on Windows PowerShell, `$TMPDIR` elsewhere). Alternatively, pass
+`--log-requests` to the widget (`ai-usagebar`), TUI (`ai-usagebar-tui`), or
+tray (`ai-usagebar-tray`) for a single invocation — the same toggle, scoped to
+that run instead of exported for the session:
 
 ```bash
 AI_USAGEBAR_LOG_REQUESTS=1 ai-usagebar --vendor zai
+```
+
+```bash
+ai-usagebar --vendor zai --log-requests
+ai-usagebar-tui --log-requests
+ai-usagebar-tray --log-requests
 ```
 
 ```powershell
@@ -919,21 +936,32 @@ $env:AI_USAGEBAR_LOG_REQUESTS = "1"
 ai-usagebar --vendor zai
 ```
 
-Only the exact value `1` enables the log; `0`, an empty value, and an unset
-variable leave it off. The TUI and tray read the setting when they start, so
-restart either process after changing it.
+Only the exact value `1` enables the log via the environment variable; `0`, an
+empty value, and an unset variable leave it off. The TUI and tray read the
+setting when they start, so restart either process after changing it.
 
 Each run opens with a `run pid=…` header, then one `request` line per attempt
 (vendor, method, fixed-provider `scheme://host/path`) and one `response` line
 per outcome (`status=200`, or a classified `error=timeout|connect|…`). Query
 strings are dropped. A custom provider logs only `scheme://host[:port]`, so a
-token in its user-supplied path or query never reaches the file.
+token in its user-supplied path or query never reaches the file. **Every line
+carries the pid**, not only the header: the widget, TUI and tray all append to
+the same file and, without a cross-process lock, their lines can interleave —
+the pid on each line is what keeps a request attributable to the run that made
+it.
 
 The header is written even when the run reaches nothing, which is what makes a
 run with no `request` lines proof it made no request — rather than a run that
 never happened. It answers two questions a cache cannot: whether a figure came
 from the network or from the cache, and whether a provider you left unchecked
 in Settings issued any request at all.
+
+**Before this log existed**, there was no way to tell a live read from a stale
+cache value: a figure on screen might be hours old, and you could not confirm
+whether a provider you had switched off had quietly reached the network.
+**After**, every request and response is on record with its pid, so a
+before/after comparison of two runs shows exactly which endpoints each process
+touched.
 
 ## TUI controls
 
@@ -1005,6 +1033,7 @@ Context options remain in TOML rather than the Settings modal.
 Press `s` while the TUI is open. The overlay lets you:
 
 - Pick the **primary vendor** that the widget defaults to and that the TUI selects on startup. Use `←` / `→` to cycle.
+- **Choose which providers are active.** Built-in providers get an active checkbox, and each configured `[[custom]]` provider gets its own checkbox; only the checked providers are fetched automatically (the active scope). An enabled vendor that is unchecked here is not fetched, even though `enabled = true` still makes it eligible.
 - Enter a key for any supported API-key provider. Keys are masked as you type;
   press `Ctrl-V` to reveal or hide them. The provider's configured environment
   variable still wins at runtime; the inline key is the fallback. Saving a

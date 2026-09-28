@@ -273,6 +273,10 @@ impl KeyInput {
     }
 }
 
+fn environment_variable_configured(name: &str) -> bool {
+    !name.is_empty() && std::env::var_os(name).is_some_and(|value| !value.is_empty())
+}
+
 /// Mutable state of the overlay while open.
 #[derive(Debug, Clone)]
 pub struct SettingsState {
@@ -297,16 +301,17 @@ pub struct SettingsState {
 
 impl SettingsState {
     pub fn from_config(cfg: &Config) -> Self {
-        Self::from_config_with(cfg, |_name| false)
+        Self::from_config_with(cfg, environment_variable_configured)
     }
 
     /// [`Self::from_config`] with an injected environment lookup.
     ///
-    /// The `_env_set` hook is retained for API compatibility with callers that
-    /// inject ambient state in tests; the active scope itself is derived from
-    /// enabled providers so automatic fetches never waste network on disabled
-    /// providers.
-    pub fn from_config_with(cfg: &Config, _env_set: impl Fn(&str) -> bool) -> Self {
+    /// `env_set` is accepted for caller symmetry with snapshot/apply key-status
+    /// flows, but this constructor does not consume it. Checkbox rows stay the
+    /// enabled set so OAuth and local logins remain selectable without an API
+    /// key, and toggling one row cannot hide another enabled vendor.
+    pub fn from_config_with(cfg: &Config, env_set: impl Fn(&str) -> bool) -> Self {
+        let _ = env_set;
         let keys = KEY_VENDORS
             .iter()
             .map(|kv| KeyInput::from_config(cfg.inline_api_key(kv.id)))
@@ -380,8 +385,7 @@ impl SettingsState {
             } else {
                 self.active_vendors.push(vendor);
             }
-            self.active_vendors = self
-                .active_choices
+            self.active_vendors = VendorId::all()
                 .iter()
                 .copied()
                 .filter(|id| self.active_vendors.contains(id))
@@ -635,17 +639,7 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
         let Some(input) = state.keys.get(i) else {
             continue;
         };
-        update_key(&mut doc, kv, input)?;
-        // Pasting a key is an explicit selection signal: keep the provider in
-        // the active fetch/display scope. Clearing a key removes it because it
-        // cannot be automatically fetched any longer.
-        if input.dirty {
-            if input.buf.is_empty() {
-                active_vendors.retain(|id| *id != kv.id);
-            } else if !active_vendors.contains(&kv.id) {
-                active_vendors.push(kv.id);
-            }
-        }
+        update_key(&mut doc, kv, input, &mut active_vendors)?;
     }
     // Choosing Copilot as primary is its explicit opt-in (GitHub CLI owns the
     // credential, so no key paste can enable it). Ensure it enters the active
@@ -686,22 +680,59 @@ pub fn save_to_path(state: &SettingsState, path: &Path) -> Result<()> {
 /// alone; a field the user cleared is *removed*, so an inline secret can be
 /// deleted from the overlay rather than lingering in the file. Writing a
 /// non-empty credential also opts the vendor in — the opt-in vendors would
-/// otherwise never fetch.
-fn update_key(doc: &mut DocumentMut, vendor: &KeyVendor, input: &KeyInput) -> Result<()> {
+/// otherwise never fetch. Also adds the vendor to the active scope atomically.
+fn update_key(
+    doc: &mut DocumentMut,
+    vendor: &KeyVendor,
+    input: &KeyInput,
+    active_vendors: &mut Vec<VendorId>,
+) -> Result<()> {
+    update_key_with_environment_check(
+        doc,
+        vendor,
+        input,
+        active_vendors,
+        environment_variable_configured,
+    )
+}
+
+fn update_key_with_environment_check(
+    doc: &mut DocumentMut,
+    vendor: &KeyVendor,
+    input: &KeyInput,
+    active_vendors: &mut Vec<VendorId>,
+    environment_configured: impl Fn(&str) -> bool,
+) -> Result<()> {
     if !input.dirty {
         return Ok(());
     }
     if input.buf.is_empty() {
+        let env_name = doc
+            .get(vendor.section)
+            .and_then(|item| item.as_table())
+            .and_then(|table| table.get("api_key_env"))
+            .and_then(|item| item.as_str())
+            .unwrap_or_else(|| vendor.id.api_key_env())
+            .to_string();
         if let Some(table) = doc
             .get_mut(vendor.section)
             .and_then(toml_edit::Item::as_table_mut)
         {
             table.remove(vendor.config_key);
         }
+        if !environment_configured(&env_name) {
+            active_vendors.retain(|id| *id != vendor.id);
+        }
         return Ok(());
     }
     set_string(doc, vendor.section, vendor.config_key, &input.buf)?;
-    set_bool(doc, vendor.section, "enabled", true)
+    set_bool(doc, vendor.section, "enabled", true)?;
+
+    // Atomic key+activate: adding a key also adds the vendor to active scope
+    if !active_vendors.contains(&vendor.id) {
+        active_vendors.push(vendor.id);
+    }
+    Ok(())
 }
 
 /// Set or update a string field in a TOML section, preserving comments and
@@ -845,7 +876,7 @@ fn snapshot_from_config_with(
     cfg: &Config,
     environment_configured: impl Fn(&str) -> bool,
 ) -> SettingsSnapshot {
-    let state = SettingsState::from_config(cfg);
+    let state = SettingsState::from_config_with(cfg, &environment_configured);
     let primary_choices = state
         .primary_choices
         .iter()
@@ -907,7 +938,7 @@ fn snapshot_from_config_with(
 fn settings_snapshot_json(cfg: &Config) -> Result<String> {
     Ok(serde_json::to_string(&snapshot_from_config_with(
         cfg,
-        |environment| std::env::var_os(environment).is_some_and(|value| !value.is_empty()),
+        environment_variable_configured,
     ))?)
 }
 
@@ -923,7 +954,7 @@ fn settings_snapshot_json_with(
 }
 
 fn vendor_from_slug(slug: &str) -> Option<VendorId> {
-    VendorId::all().iter().copied().find(|id| id.slug() == slug)
+    VendorId::from_slug(slug)
 }
 
 fn state_from_apply_request(cfg: &Config, raw: &str) -> Result<SettingsState> {
@@ -1074,10 +1105,35 @@ fn apply_settings_from_stdin() -> Result<()> {
 }
 
 /// Explicit user opt-in, unlike discovery which respects an existing false.
+/// When `[ui] active_vendors` already exists, the vendor is appended so it
+/// joins that explicit automatic scope. The key is left absent otherwise, so
+/// `settings enable` cannot collapse a legacy all-enabled install to one vendor.
 fn enable_vendor_at(path: &Path, vendor: VendorId) -> Result<()> {
     let mut doc = read_config_document(path)?;
     let before = doc.to_string();
     set_bool(&mut doc, vendor.config_section(), "enabled", true)?;
+
+    if let Some(arr) = doc
+        .get("ui")
+        .and_then(|item| item.as_table())
+        .and_then(|table| table.get("active_vendors"))
+        .and_then(|item| item.as_array())
+    {
+        let mut active_vendors: Vec<VendorId> = arr
+            .iter()
+            .filter_map(|item| item.as_str().and_then(VendorId::from_slug))
+            .collect();
+        if !active_vendors.contains(&vendor) {
+            active_vendors.push(vendor);
+        }
+        active_vendors = VendorId::all()
+            .iter()
+            .copied()
+            .filter(|id| active_vendors.contains(id))
+            .collect();
+        set_vendor_list(&mut doc, "ui", "active_vendors", &active_vendors)?;
+    }
+
     if doc.to_string() != before {
         write_config_document(path, &doc)?;
     }
@@ -1427,6 +1483,23 @@ mod tests {
     }
 
     #[test]
+    fn explicit_enable_appends_only_when_active_vendors_already_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[ui]\nactive_vendors = [\"openai\"]\n[anthropic]\nenabled = false\n",
+        )
+        .unwrap();
+        enable_vendor_at(&path, VendorId::Anthropic).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("enabled = true"));
+        assert!(raw.contains("active_vendors = [\"anthropic\", \"openai\"]"));
+        enable_vendor_at(&path, VendorId::Anthropic).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+    }
+
+    #[test]
     fn explicit_enable_creates_missing_config_and_rejects_malformed_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested/config.toml");
@@ -1641,6 +1714,86 @@ mod tests {
             vec![VendorId::Anthropic, VendorId::Zai]
         );
         assert_eq!(state.primary_choices[0], VendorId::Anthropic);
+    }
+
+    #[test]
+    fn toggling_one_active_vendor_preserves_untouched_entries() {
+        let mut state = blank_state(VendorId::Anthropic);
+        state.active_choices = vec![VendorId::Zai];
+        state.active_vendors = vec![VendorId::Anthropic, VendorId::Zai];
+        state.primary_choices = state.active_vendors.clone();
+
+        state.toggle_active(0);
+        assert_eq!(state.active_vendors, vec![VendorId::Anthropic]);
+
+        state.toggle_active(0);
+        assert_eq!(
+            state.active_vendors,
+            vec![VendorId::Anthropic, VendorId::Zai]
+        );
+    }
+
+    #[test]
+    fn clearing_inline_key_keeps_active_scope_when_env_credential_remains() {
+        let var = format!("AI_USAGEBAR_TEST_ZAI_ENV_RETAIN_{}", std::process::id());
+        unsafe { std::env::set_var(&var, "from-env") };
+        let (_dir, path) = temp_config(Some(&format!(
+            "[zai]\nenabled = true\napi_key_env = \"{var}\"\napi_key = \"old-secret\"\n"
+        )));
+        let mut state = blank_state(VendorId::Zai);
+        state.active_vendors = vec![VendorId::Zai];
+        state.primary_choices = vec![VendorId::Zai];
+        state.keys[key_index(VendorId::Zai)] = KeyInput::default();
+        state.keys[key_index(VendorId::Zai)].dirty = true;
+        let result = save_to_path(&state, &path);
+        unsafe { std::env::remove_var(&var) };
+        result.unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("old-secret"));
+        assert!(raw.contains("active_vendors = [\"zai\"]"));
+    }
+
+    #[test]
+    fn clearing_inline_key_distinguishes_empty_and_absent_api_key_env() {
+        let vendor = KEY_VENDORS
+            .iter()
+            .find(|vendor| vendor.id == VendorId::Zai)
+            .unwrap();
+        let input = KeyInput {
+            dirty: true,
+            ..KeyInput::default()
+        };
+        let default_environment_is_set = |name: &str| name == "ZAI_API_KEY";
+
+        let mut explicit_empty = "[zai]\napi_key_env = \"\"\napi_key = \"inline\"\n"
+            .parse::<DocumentMut>()
+            .unwrap();
+        let mut active_vendors = vec![VendorId::Zai];
+        update_key_with_environment_check(
+            &mut explicit_empty,
+            vendor,
+            &input,
+            &mut active_vendors,
+            default_environment_is_set,
+        )
+        .unwrap();
+        assert!(active_vendors.is_empty());
+        assert!(!explicit_empty.to_string().contains("api_key ="));
+
+        let mut absent = "[zai]\napi_key = \"inline\"\n"
+            .parse::<DocumentMut>()
+            .unwrap();
+        let mut active_vendors = vec![VendorId::Zai];
+        update_key_with_environment_check(
+            &mut absent,
+            vendor,
+            &input,
+            &mut active_vendors,
+            default_environment_is_set,
+        )
+        .unwrap();
+        assert_eq!(active_vendors, vec![VendorId::Zai]);
+        assert!(!absent.to_string().contains("api_key ="));
     }
 
     fn custom_spec(id: &str) -> crate::config::CustomProviderConfig {

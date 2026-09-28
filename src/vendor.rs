@@ -530,6 +530,12 @@ impl VendorId {
             VendorId::Ollama,
         ]
     }
+
+    /// Parse a `VendorId` from its slug (the string used in config files and CLI).
+    /// Returns `None` if the slug is not recognized.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|id| id.slug() == slug)
+    }
 }
 
 /// What a vendor returns from a successful fetch — the same
@@ -842,6 +848,9 @@ mod tests {
                 id.slug(),
                 serde_json::to_value(id).unwrap().as_str().unwrap()
             );
+            assert_eq!(VendorId::from_slug(id.slug()), Some(*id));
         }
+        assert!(VendorId::from_slug("not-a-vendor").is_none());
+        assert!(VendorId::from_slug("").is_none());
     }
 }

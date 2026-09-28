@@ -17,6 +17,13 @@ fn main() {
     // `--config` file's state; only then validate the override path, which
     // must be set before any config is read.
     let cli = Cli::parse_from(argv);
+    // A per-invocation way to turn the request log on, equivalent to
+    // `AI_USAGEBAR_LOG_REQUESTS=1` but without exporting the variable. It must
+    // be set before the process-wide sink is created below.
+    if cli.log_requests {
+        ai_usagebar::request_log::enable_via_cli_flag();
+    }
+    ai_usagebar::request_log::begin_run();
     if let Some(path) = &config_path {
         if !path.is_file() {
             eprintln!(
@@ -27,7 +34,6 @@ fn main() {
         }
         ai_usagebar::config::set_override_path(path);
     }
-    ai_usagebar::request_log::begin_run();
     if let Some(Command::Account { action }) = &cli.command {
         std::process::exit(ai_usagebar::account::run(action));
     }

@@ -1,20 +1,24 @@
 //! Opt-in outbound-request log, for answering "did this provider reach the
 //! network, or was the figure a cache hit?".
 //!
-//! Set `AI_USAGEBAR_LOG_REQUESTS=1` and every request built through [`send`]
-//! appends to `ai-usagebar-requests.log` in the system temp directory:
+//! Set `AI_USAGEBAR_LOG_REQUESTS=1` (or pass `--log-requests` to the widget,
+//! TUI, or tray) and every request built through [`send`] appends to
+//! `ai-usagebar-requests.log` in the system temp directory:
 //!
 //! ```text
 //! 2026-09-22T02:55:01.130Z run pid=3312 version=1.20.2
-//! 2026-09-22T02:55:01.138Z request vendor=zai method=GET target=https://api.z.ai/api/monitor/usage/quota/limit
-//! 2026-09-22T02:55:01.245Z response vendor=zai status=200
+//! 2026-09-22T02:55:01.138Z request pid=3312 vendor=zai method=GET target=https://api.z.ai/api/monitor/usage/quota/limit
+//! 2026-09-22T02:55:01.245Z response pid=3312 vendor=zai status=200
 //! ```
 //!
-//! The `run` header carries the pid, so two runs appended to one file stay
-//! tellable apart — a before/after comparison is a diff of two sections rather
-//! than of two files. Each binary opens its run through [`begin_run`] before it
-//! does any work, so a run that lists no request is proof it made none, not a
-//! run that quietly never happened.
+//! Every line — not only the `run` header — carries the pid, because the file
+//! sink is process-local: the widget, TUI and tray all append to the same file,
+//! and without a cross-process lock their lines can interleave. A pid on each
+//! line is what keeps a request attributable to the run that made it, so a
+//! before/after comparison groups a line under its own pid rather than assuming
+//! two runs stay byte-contiguous. Each binary opens its run through
+//! [`begin_run`] before it does any work, so a run that lists no request is
+//! proof it made none, not a run that quietly never happened.
 //!
 //! **Fixed vendor lines carry scheme, host, port and path — never the query
 //! string.** A custom provider's URL is wholly user-supplied, so its log line
@@ -45,6 +49,18 @@ use reqwest::RequestBuilder;
 use reqwest::Response;
 
 use crate::display::sanitize_untrusted_line;
+
+/// Set by the `--log-requests` CLI flag before the first request runs, so a
+/// user can turn the request log on for one invocation without exporting an
+/// environment variable. It is read once, when the process-wide sink is created;
+/// setting it later is a no-op.
+static CLI_OPT_IN: AtomicBool = AtomicBool::new(false);
+
+/// Enable the request log for this process via the CLI flag. Call it before any
+/// request runs; once the sink exists, the flag cannot change its target.
+pub fn enable_via_cli_flag() {
+    CLI_OPT_IN.store(true, Ordering::Release);
+}
 
 /// The exact value `1` turns the log on. Every other value is off.
 const ENV_VAR: &str = "AI_USAGEBAR_LOG_REQUESTS";
@@ -92,12 +108,7 @@ impl Sink {
     /// The production resolver: only `AI_USAGEBAR_LOG_REQUESTS=1` picks the
     /// file in the system temp directory, next to the tray's own trace log.
     pub fn from_env() -> Self {
-        let value = std::env::var_os(ENV_VAR);
-        if enabled_value(value.as_deref()) {
-            Self::at(std::env::temp_dir().join(FILE_NAME))
-        } else {
-            Self::disabled()
-        }
+        resolve_process_sink(std::env::var_os(ENV_VAR).as_deref(), false)
     }
 
     /// Whether anything would be written. Callers check this before doing work
@@ -151,7 +162,12 @@ impl Sink {
         let Some(path) = self.path.as_deref() else {
             return;
         };
-        let mut line = format!("{} {event}", timestamp());
+        // Every event line carries the pid, not only the `run` header. The file
+        // sink is process-local (its lock guards writes within one process), so
+        // when the widget, TUI and tray all log to the same file their lines can
+        // interleave; the pid on each line is what keeps a request attributable
+        // to the run that made it.
+        let mut line = format!("{} {event} pid={}", timestamp(), std::process::id());
         for (key, value) in fields {
             line.push(' ');
             line.push_str(key);
@@ -301,10 +317,27 @@ fn write_line(path: &Path, line: &str) -> bool {
     writeln!(file, "{line}").is_ok()
 }
 
-/// The process-wide sink: the env var decides, once.
+/// Env var or `--log-requests` both select the same file sink. Extracted so
+/// tests can cover the CLI path without touching the process-wide `OnceLock`
+/// or the real temp directory.
+fn resolve_process_sink(env_value: Option<&OsStr>, cli_opt_in: bool) -> Sink {
+    if enabled_value(env_value) || cli_opt_in {
+        Sink::at(std::env::temp_dir().join(FILE_NAME))
+    } else {
+        Sink::disabled()
+    }
+}
+
+/// The process-wide sink: the env var decides, once — and a CLI flag can opt a
+/// single invocation in when the variable is unset.
 fn sink() -> &'static Sink {
     static SINK: OnceLock<Sink> = OnceLock::new();
-    SINK.get_or_init(Sink::from_env)
+    SINK.get_or_init(|| {
+        resolve_process_sink(
+            std::env::var_os(ENV_VAR).as_deref(),
+            CLI_OPT_IN.load(Ordering::Acquire),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -464,12 +497,65 @@ mod tests {
             "{log}"
         );
         assert!(
-            log.contains(" request vendor=zai method=GET target="),
+            log.contains(&format!(
+                " request pid={} vendor=zai method=GET target=",
+                std::process::id()
+            )),
             "{log}"
         );
         assert!(log.contains("/usage"), "{log}");
-        assert!(log.contains(" response vendor=zai status=200"), "{log}");
+        assert!(
+            log.contains(&format!(
+                " response pid={} vendor=zai status=200",
+                std::process::id()
+            )),
+            "{log}"
+        );
         assert!(!log.contains("super-secret"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn event_lines_carry_the_pid_not_only_the_header() {
+        // Regression: the pid must appear on every request/response line, not
+        // only on the `run` header. The file sink is process-local, so when the
+        // widget, TUI and tray all append to one file their lines can interleave;
+        // the pid on each line is what keeps a request attributable to the run
+        // that made it.
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/usage")
+            .with_status(200)
+            .create_async()
+            .await;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join(FILE_NAME);
+        let sink = Sink::at(&path);
+        let client = reqwest::Client::new();
+
+        let _ = send_with(&sink, "zai", client.get(format!("{}/usage", server.url())))
+            .await
+            .expect("the mock answers");
+        mock.assert_async().await;
+
+        let log = read(&path);
+        let pid = format!("pid={}", std::process::id());
+        for line in log.lines() {
+            if line.contains(" request ") || line.contains(" response ") {
+                assert!(line.contains(&pid), "event line without pid: {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_cli_flag_selects_the_file_sink_for_one_invocation() {
+        // Mirrors widget/TUI/tray wiring without the process-wide OnceLock or
+        // the real temp file: env off + CLI opt-in enables the same file sink
+        // the env var would pick; env off + no flag stays disabled.
+        assert!(!resolve_process_sink(None, false).is_enabled());
+        assert!(resolve_process_sink(None, true).is_enabled());
+        assert!(resolve_process_sink(Some(OsStr::new("1")), false).is_enabled());
+        assert!(resolve_process_sink(Some(OsStr::new("0")), true).is_enabled());
+        assert!(!resolve_process_sink(Some(OsStr::new("true")), false).is_enabled());
     }
 
     #[tokio::test]
@@ -536,7 +622,7 @@ mod tests {
         let log = read(&path);
         let kind = log
             .lines()
-            .find(|line| line.contains(" response vendor=custom "))
+            .find(|line| line.contains("response pid=") && line.contains("vendor=custom"))
             .and_then(|line| line.split("error=").nth(1))
             .unwrap_or_else(|| panic!("no classified error line in {log}"));
         assert!(
@@ -559,7 +645,7 @@ mod tests {
 
         let log = read(&path);
         assert_eq!(log.matches(" run pid=").count(), 1, "{log}");
-        assert_eq!(log.matches(" request vendor=zai").count(), 3, "{log}");
+        assert_eq!(log.matches("request pid=").count(), 3, "{log}");
     }
 
     /// A vendor that opens its own connection is invisible to the log, and the

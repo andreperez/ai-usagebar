@@ -138,6 +138,17 @@ pub struct Cli {
     /// Administrative command. Omit it to run the normal usage widget.
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Write every outbound request and response to `ai-usagebar-requests.log`
+    /// in the system temp directory (next to the tray's trace log), one run per
+    /// process. The same toggle as `AI_USAGEBAR_LOG_REQUESTS=1`, but scoped to a
+    /// single invocation instead of exported for the session. Each line carries
+    /// the pid, so the widget, TUI and tray logging to the same file stay
+    /// attributable when their lines interleave.
+    ///
+    /// This flag is global and applies to all subcommands.
+    #[arg(long, global = true)]
+    pub log_requests: bool,
 }
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -888,5 +899,13 @@ mod tests {
         let cli = Cli::parse_from(["ai-usagebar", "--watch", "5"]);
         assert_eq!(cli.watch, Some(5));
         assert!(!cli.output_json());
+    }
+
+    #[test]
+    fn log_requests_flag_is_recognized() {
+        let cli = Cli::parse_from(["ai-usagebar", "--log-requests"]);
+        assert!(cli.log_requests);
+        let cli = Cli::parse_from(["ai-usagebar"]);
+        assert!(!cli.log_requests);
     }
 }

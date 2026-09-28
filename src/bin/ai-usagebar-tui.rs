@@ -46,7 +46,7 @@ async fn main() {
     }
 }
 
-/// The TUI accepts only `--config <PATH>` (or `--config=PATH`); every other
+/// The TUI accepts `--config <PATH>` and `--log-requests`; every other
 /// argument is rejected so typos fail fast instead of being silently ignored.
 /// The path must already exist — loads treat a missing file as defaults, which
 /// would hide the mistake. Must run before any config is read.
@@ -79,8 +79,10 @@ where
                 return Err("--config given more than once".into());
             }
             override_path = Some(value);
+        } else if arg == "--log-requests" {
+            ai_usagebar::request_log::enable_via_cli_flag();
         } else if arg == "--help" || arg == "-h" {
-            println!("usage: ai-usagebar-tui [--config <PATH>]");
+            println!("usage: ai-usagebar-tui [--config <PATH>] [--log-requests]");
             std::process::exit(0);
         } else {
             return Err(format!("unrecognized argument: {}", arg.to_string_lossy()));
